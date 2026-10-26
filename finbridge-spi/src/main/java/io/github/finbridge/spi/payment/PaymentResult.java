@@ -1,0 +1,24 @@
+package io.github.finbridge.spi.payment;
+
+import io.github.finbridge.spi.ProviderErrorCategory;
+import java.util.Objects;
+
+public record PaymentResult(PaymentStatus status, String providerTransactionId,
+                            ProviderErrorCategory errorCategory, String providerCode) {
+    public PaymentResult {
+        Objects.requireNonNull(status, "status");
+        if (status == PaymentStatus.SUCCEEDED && providerTransactionId == null) {
+            throw new IllegalArgumentException("Successful payment requires provider transaction ID");
+        }
+        if (providerTransactionId != null && providerTransactionId.isBlank()) {
+            throw new IllegalArgumentException("providerTransactionId must not be blank");
+        }
+        if (providerCode != null && providerCode.isBlank()) {
+            throw new IllegalArgumentException("providerCode must not be blank");
+        }
+    }
+
+    public static PaymentResult succeeded(String providerTransactionId) {
+        return new PaymentResult(PaymentStatus.SUCCEEDED, providerTransactionId, null, null);
+    }
+}
