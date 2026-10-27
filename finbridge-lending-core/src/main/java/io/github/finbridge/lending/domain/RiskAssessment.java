@@ -23,6 +23,10 @@ public record RiskAssessment(UUID assessmentId, UUID applicationId, UUID tenantI
                 && (decision == null || completedAt == null || policyVersion.isBlank())) {
             throw new IllegalArgumentException("Completed assessment requires decision, policy and time");
         }
+        if (status == AssessmentStatus.COMPLETED && creditScore == null && blacklistHit == null
+                && fraudSignal == null) {
+            throw new IllegalArgumentException("Completed assessment must contain normalized evidence");
+        }
         if (completedAt != null && completedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("completedAt cannot precede createdAt");
         }

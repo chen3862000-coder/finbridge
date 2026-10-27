@@ -15,5 +15,7 @@ The v2 ADRs are **proposed**, not accepted. They capture the choices recommended
 | [ADR-009](ADR-009-loan-activation-after-disbursement.md) | Activate only after confirmed disbursement |
 | [ADR-010](ADR-010-repayment-plan-generation.md) | Deterministic amortization and schedule dates |
 | [ADR-011](ADR-011-postgresql-persistence.md) | PostgreSQL for durable platform state |
+| [ADR-012](ADR-012-synthetic-risk-policy.md) | User-approved deterministic synthetic risk policy |
+| [ADR-013](ADR-013-durable-risk-step-recovery.md) | Durable M3 risk-step recovery; payment workflow remains M4 |
 
 Related active plan and evidence status: [M0 architecture proposal v2](../architecture/m0-proposal-v2.md). The original [v1 proposal](../architecture/m0-proposal.md) is superseded history.

@@ -33,11 +33,15 @@
         <module>finbridge-spi</module>
         <module>finbridge-plugin-runtime</module>
         <module>finbridge-lending-core</module>
+        <module>finbridge-risk-gateway</module>
         <module>finbridge-host</module>
         <module>plugins/private-helper-v1</module>
         <module>plugins/private-helper-v2</module>
         <module>plugins/alphapay-v1</module>
         <module>plugins/alphapay-v2</module>
+        <module>plugins/creditscorex</module>
+        <module>plugins/blacklisty</module>
+        <module>plugins/fraudsignalz</module>
         <module>integration-tests</module>
     </modules>
 

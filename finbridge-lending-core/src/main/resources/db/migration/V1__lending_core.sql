@@ -61,6 +61,36 @@ CREATE TABLE risk_assessments (
 CREATE INDEX ix_risk_assessments_application
     ON risk_assessments (tenant_id, application_id, created_at DESC);
 
+CREATE TABLE origination_workflows (
+    workflow_id UUID PRIMARY KEY,
+    application_id UUID NOT NULL UNIQUE REFERENCES loan_applications (application_id),
+    tenant_id UUID NOT NULL REFERENCES tenants (tenant_id),
+    state VARCHAR(32) NOT NULL,
+    active_risk_attempt_id UUID,
+    active_assessment_id UUID,
+    completed_assessment_id UUID REFERENCES risk_assessments (assessment_id),
+    version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0),
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE origination_workflow_steps (
+    attempt_id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL REFERENCES origination_workflows (workflow_id),
+    step_name VARCHAR(48) NOT NULL,
+    state VARCHAR(24) NOT NULL,
+    attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    assessment_id UUID REFERENCES risk_assessments (assessment_id),
+    failure_code VARCHAR(80)
+);
+
+ALTER TABLE origination_workflows ADD CONSTRAINT fk_workflow_active_assessment
+    FOREIGN KEY (active_assessment_id) REFERENCES risk_assessments (assessment_id);
+
+CREATE INDEX ix_workflow_steps_recovery ON origination_workflow_steps (state, started_at);
+
 CREATE TABLE loans (
     loan_id UUID PRIMARY KEY,
     application_id UUID NOT NULL UNIQUE REFERENCES loan_applications (application_id),

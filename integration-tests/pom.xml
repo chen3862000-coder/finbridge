@@ -29,6 +29,11 @@
         </dependency>
         <dependency>
             <groupId>io.github.finbridge</groupId>
+            <artifactId>finbridge-risk-gateway</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.finbridge</groupId>
             <artifactId>finbridge-host</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -41,6 +46,24 @@
         <dependency>
             <groupId>io.github.finbridge</groupId>
             <artifactId>alphapay-v2</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.finbridge</groupId>
+            <artifactId>creditscorex</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.finbridge</groupId>
+            <artifactId>blacklisty</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.finbridge</groupId>
+            <artifactId>fraudsignalz</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>

@@ -164,7 +164,7 @@ Generate installment principal/interest values before disbursement, but set due 
 
 Risk Gateway obtains `CREDIT_SCORE`, `BLACKLIST`, and `FRAUD_SIGNAL` using tenant bindings; the core consumes normalized typed evidence with provider ID/version per fact. CreditScoreX, BlacklistY, and FraudSignalZ return synthetic results. The gateway handles timeouts, invalid responses, unavailable capabilities, and partial results but does not decide lending eligibility.
 
-Lending Core owns versioned deterministic policy and persisted reason codes. Proposed illustrative rules: blacklist hit -> REJECT; critical synthetic fraud -> REJECT; missing/invalid mandatory facts -> REVIEW; low score -> REVIEW/REJECT per a fixed policy version; favorable complete evidence -> APPROVE. Exact thresholds and which data is mandatory are M0 decisions. A provider exception is not a negative signal. A rejected/review application creates no loan, schedule, or payment. Risk policy must be reproducible from stored normalized inputs and policy version; raw provider payloads are not needed.
+Lending Core owns versioned deterministic policy and persisted reason codes. **User-approved synthetic policy for M3:** blacklist and credit score are mandatory; fraud signal is optional. Blacklist hit or CRITICAL fraud -> REJECT. Missing/invalid mandatory data -> REVIEW. Score below 600 -> REJECT; 600-679 -> REVIEW; 680+ with complete mandatory data and no disqualifier -> APPROVE. Provider timeout/exception is unavailable data, not a negative signal. A rejected/review application creates no loan, schedule, or payment. Risk policy is reproducible from stored normalized inputs and policy version; raw provider payloads are not needed. These thresholds are synthetic demonstration policy, not validated underwriting.
 
 ## 8. Durable Origination Workflow and Transaction Boundaries
 
@@ -363,9 +363,12 @@ The full reactor uses an empty aggregator POM and a test-only integration module
 
 M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.md` and `docs/architecture/06-repayment-plan-design.md`, with the completed review record in `docs/quality/architecture-review-checklist.md`.
 
-### M3 — Risk Integration and Approval
+### M3 — Risk Integration, Approval, and Durable Risk-Step Recovery
 
 - Implement risk gateway, CreditScoreX/BlacklistY/FraudSignalZ, normalization, tenant routing, deterministic core-owned policy, evidence persistence, and risk workflow tests.
+- Persist origination workflow and risk-step attempt state. External risk reads remain outside DB transactions. Recovery can repeat this read-only risk step and persist the assessment/decision without duplicate application transitions using unique keys and optimistic versions. Disbursement/payment recovery remains M4.
+
+**M3 implementation status:** Implemented in the current workspace; final root quality verification is pending. The synthetic risk policy and durable retry boundary are recorded as accepted ADR-012/013. See those ADRs and the M3 review/requirement traceability record in `docs/quality/architecture-review-checklist.md`. The policy is demonstration-only and not validated underwriting.
 
 ### M4 — Payment and Durable Disbursement Workflow
 

@@ -110,28 +110,41 @@ class PluginContractsTest {
         PaymentTransactionRef transactionRef = new PaymentTransactionRef("provider-ref");
         assertEquals("provider-ref", transactionRef.providerTransactionId());
         assertThrows(IllegalArgumentException.class, () -> new PaymentTransactionRef(" "));
+        assertEquals(RiskDataType.BLACKLIST, new BlacklistValue(true).dataType());
+        assertEquals(RiskDataType.FRAUD_SIGNAL,
+                new FraudSignalValue(FraudSignalValue.Severity.NONE, "CLEAR").dataType());
+    }
+
+    @Test
+    void riskResultsPreserveTypedAvailableUnavailableAndInvalidOutcomes() {
         RiskDataResult available = new RiskDataResult(RiskDataType.CREDIT_SCORE,
                 RiskDataResult.Status.AVAILABLE, new CreditScoreValue(720), null);
         assertEquals(720, ((CreditScoreValue) available.value()).score());
         assertEquals(RiskDataType.CREDIT_SCORE, available.dataType());
         assertEquals(RiskDataResult.Status.AVAILABLE, available.status());
+        assertEquals(680, ((CreditScoreValue) RiskDataResult.available(
+                new CreditScoreValue(680)).value()).score());
         assertThrows(IllegalArgumentException.class, () -> new RiskDataResult(
                 RiskDataType.BLACKLIST, RiskDataResult.Status.UNAVAILABLE, null, null));
         RiskDataResult unavailable = new RiskDataResult(RiskDataType.BLACKLIST,
                 RiskDataResult.Status.UNAVAILABLE, null, "PROVIDER_TIMEOUT");
         assertEquals("PROVIDER_TIMEOUT", unavailable.reasonCode());
+        assertEquals("NO_BINDING", RiskDataResult.unavailable(
+                RiskDataType.BLACKLIST, "NO_BINDING").reasonCode());
         RiskDataResult invalid = new RiskDataResult(RiskDataType.FRAUD_SIGNAL,
                 RiskDataResult.Status.INVALID, null, "INVALID_RESPONSE");
         assertEquals(RiskDataType.FRAUD_SIGNAL, invalid.dataType());
         assertEquals(RiskDataResult.Status.INVALID, invalid.status());
+        assertEquals("BAD_VALUE", RiskDataResult.invalid(
+                RiskDataType.CREDIT_SCORE, "BAD_VALUE").reasonCode());
         assertEquals(RiskDataResult.Status.values().length, 3);
         assertEquals(RiskDataType.values().length, 3);
 
-        RiskDataRequest riskRequest = new RiskDataRequest(UUID.randomUUID(), UUID.randomUUID(),
+        RiskDataRequest request = new RiskDataRequest(UUID.randomUUID(), UUID.randomUUID(),
                 "synthetic-applicant");
-        assertEquals("synthetic-applicant", riskRequest.syntheticApplicantId());
-        assertNotNull(riskRequest.assessmentId());
-        assertNotNull(riskRequest.tenantId());
+        assertEquals("synthetic-applicant", request.syntheticApplicantId());
+        assertNotNull(request.assessmentId());
+        assertNotNull(request.tenantId());
         assertThrows(IllegalArgumentException.class, () -> new RiskDataRequest(UUID.randomUUID(),
                 UUID.randomUUID(), " "));
         assertThrows(IllegalArgumentException.class, () -> new RiskDataResult(
@@ -142,9 +155,6 @@ class PluginContractsTest {
         assertThrows(IllegalArgumentException.class, () -> new RiskDataResult(
                 RiskDataType.BLACKLIST, RiskDataResult.Status.UNAVAILABLE,
                 new BlacklistValue(false), "NO_DATA"));
-        assertEquals(RiskDataType.BLACKLIST, new BlacklistValue(true).dataType());
-        assertEquals(RiskDataType.FRAUD_SIGNAL,
-                new FraudSignalValue(FraudSignalValue.Severity.NONE, "CLEAR").dataType());
     }
 
     @Test

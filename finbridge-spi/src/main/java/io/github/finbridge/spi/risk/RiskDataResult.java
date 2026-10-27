@@ -26,4 +26,17 @@ public record RiskDataResult(RiskDataType dataType, Status status,
             throw new IllegalArgumentException("Unavailable data requires a reason code");
         }
     }
+
+    public static RiskDataResult available(RiskDataValue value) {
+        Objects.requireNonNull(value, "value");
+        return new RiskDataResult(value.dataType(), Status.AVAILABLE, value, null);
+    }
+
+    public static RiskDataResult unavailable(RiskDataType dataType, String reasonCode) {
+        return new RiskDataResult(dataType, Status.UNAVAILABLE, null, reasonCode);
+    }
+
+    public static RiskDataResult invalid(RiskDataType dataType, String reasonCode) {
+        return new RiskDataResult(dataType, Status.INVALID, null, reasonCode);
+    }
 }

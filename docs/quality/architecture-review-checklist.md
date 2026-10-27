@@ -127,3 +127,26 @@ Requirement traceability:
 | One loan/plan/installment set persisted atomically | `JdbcLendingAggregateRepository.originate` | PostgreSQL Testcontainers atomic/duplicate/recovery tests | `02-lending-domain-model.md` |
 | Loan not ACTIVE before confirmed disbursement fields | `Loan` state constructor/transition | `DomainStateTest.loanCannotActivateBeforePaymentIntentAndConfirmedTimestamp` | `02-lending-domain-model.md`; ADR-009 |
 | Risk evidence stores normalized values and provider references | `RiskAssessment`, `JdbcRiskAssessmentRepository` | PostgreSQL round-trip, invalid JSON, and write failure tests | `02-lending-domain-model.md` |
+
+## M3 Review Record (2026-10-27)
+
+| Item | Record |
+|---|---|
+| Milestone/change | M3 Risk Integration, Approval, and Durable Risk-Step Recovery |
+| Reviewer/date | Coding-agent review, 2026-10-27 |
+| Relevant requirements and ADRs | v2 proposal M3 scope and risk policy; accepted ADR-012 synthetic risk policy; accepted ADR-013 durable read-only risk-step recovery; existing ADR-005 tenant capability routing and ADR-011 PostgreSQL persistence |
+| Implementation/test/doc references | `finbridge-risk-gateway` (`RiskDataGateway`, `SyntheticRiskDecisionPolicy`); risk providers `plugins/creditscorex`, `plugins/blacklisty`, `plugins/fraudsignalz`; `PluginRuntime.installRiskProvider` and risk provider discovery; `RiskAssessmentService`; workflow and assessment JDBC repositories; Flyway V1; external-JAR runtime/gateway tests; PostgreSQL workflow integration tests; `ADR-012`, `ADR-013`, `m0-proposal-v2.md` |
+| Deviations and approvals | Implements only synthetic read-only risk providers and user-approved demo thresholds. Risk calls occur outside database transactions. A running workflow reserves one assessment ID; interrupted provider reads may be repeated, while completed assessments are returned without provider calls. Payment intent, disbursement, payment ambiguity recovery, API, and UI remain outside M3. The missing reserved pending assessment now fails closed rather than attempting an unowned insert; reservation and active workflow references are created atomically at workflow start. |
+| Quality gate command/result | `JAVA_HOME="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home" PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home/bin:$PATH" ./mvnw --batch-mode --no-transfer-progress clean verify` -> BUILD SUCCESS, full 14-module reactor. 106 tests passed, 0 failures/errors/skips. SpotBugs reported zero findings; PMD had no violations; JaCoCo bundle/class/method checks met configured thresholds in all production modules. PostgreSQL Testcontainers and external plugin JAR tests ran. |
+| Open findings/risks | Risk policy is illustrative, not validated underwriting. Provider fixtures are synthetic and repeatable; real providers require re-evaluation of retry semantics. The executor bounds risk provider calls but does not sandbox plugins. Existing multi-tenant identity is supplied to service/repository boundaries; authenticated HTTP principal enforcement remains a later API concern. No downstream loan origination follows an approval in M3. |
+
+Requirement traceability:
+
+| Requirement | Module/class | Test evidence | Documentation |
+|---|---|---|---|
+| Mandatory credit score/blacklist, optional fraud, deterministic policy thresholds and precedence | `SyntheticRiskDecisionPolicy` | `SyntheticRiskDecisionPolicyTest` covers score boundaries, mandatory missing/invalid data, optional fraud outage, blacklist and critical-fraud rejection | ADR-012; proposal v2 risk policy section |
+| Load risk providers from external artifacts with shared SPI and expected capability validation | `PluginRuntime.installRiskProvider`, `PluginDiscovery.discoverRiskProvider` | `PluginRuntimeRiskIntegrationTest` loads and invokes an assembled CreditScoreX artifact with provider-free parent loader; `RiskDataGatewayIntegrationTest` loads all three risk JARs | ADR-005; ADR-012 |
+| Tenant capability routing, bounded execution, normalized provider failures and stable execution IDs | `RiskDataGateway` | `RiskDataGatewayIntegrationTest`, `RiskDataGatewayFailureTest` exercise routing, missing binding, timeout/cancellation, executor rejection, provider exception and typed values | ADR-012 |
+| Persist workflow/attempt/assessment ownership before read; allow safe retry after interruption | `JdbcLendingAggregateRepository`, `JdbcRiskAssessmentRepository` | PostgreSQL `JdbcLendingCoreIntegrationTest` covers start/resume, interrupted attempt history, stale claims, completion rollback, completed-claim replay and atomic application/workflow/assessment completion | ADR-013 |
+| Do not repeat completed provider reads; scope assessment lookup by tenant | `RiskAssessmentService` | `RiskAssessmentServiceTest` covers completed workflow replay without provider calls and tenant-scoped latest assessment lookup | ADR-013 |
+| Preserve M3 boundary; do not originate loans or invoke payment | `RiskAssessmentService`, Lending Core module | Policy/service tests assert assessment outcome; module contains no payment intent or disbursement workflow step | ADR-013; proposal v2 M3/M4 gates |

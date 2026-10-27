@@ -54,6 +54,18 @@ final class PluginDiscovery {
         return found.getFirst();
     }
 
+    RiskDataProvider discoverRiskProvider(PluginClassLoader loader) {
+        List<RiskDataProvider> providers = new ArrayList<>();
+        withContextLoader(loader, () -> {
+            ServiceLoader.load(RiskDataProvider.class, loader).forEach(providers::add);
+            return null;
+        });
+        if (providers.size() != 1) {
+            throw new PluginLoadException("Risk plugin JAR must expose exactly one risk provider");
+        }
+        return providers.getFirst();
+    }
+
     void validateDescriptor(PluginDescriptor descriptor, int supportedSpiMajor) {
         if (descriptor.spiMajorVersion() != supportedSpiMajor) {
             throw new PluginLoadException("Unsupported SPI major version: "

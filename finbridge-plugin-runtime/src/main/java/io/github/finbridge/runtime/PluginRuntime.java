@@ -5,6 +5,7 @@ import io.github.finbridge.spi.FinBridgePlugin;
 import io.github.finbridge.spi.PluginContext;
 import io.github.finbridge.spi.PluginDescriptor;
 import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.spi.risk.RiskDataProvider;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -62,6 +63,43 @@ public final class PluginRuntime {
 
     public void activate(PluginKey key) {
         plugin(key).activate();
+    }
+
+    public PluginHandle installRiskProvider(String artifactName, PluginContext context,
+                                            io.github.finbridge.spi.risk.RiskDataType expectedType) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(expectedType, "expectedType");
+        Path artifact = artifacts.resolve(Objects.requireNonNull(artifactName, "artifactName"));
+        artifacts.validate(artifact);
+        String checksum = artifacts.checksum(artifact);
+        PluginClassLoader loader = discovery.createLoader(artifact);
+        RiskDataProvider provider = null;
+        try {
+            provider = discovery.discoverRiskProvider(loader);
+            PluginDescriptor descriptor = Objects.requireNonNull(provider.descriptor(),
+                    "Plugin descriptor is required");
+            discovery.validateDescriptor(descriptor, supportedSpiMajor);
+            discovery.validateProviderContract(provider, descriptor);
+            if (provider.supportedType() != expectedType) {
+                throw new PluginLoadException("Risk provider does not match requested data capability");
+            }
+            RiskDataProvider initialized = provider;
+            PluginDiscovery.withContextLoader(loader, () -> {
+                initialized.initialize(context);
+                if (!initialized.healthCheck().healthy()) {
+                    throw new PluginLoadException("Risk provider health check failed");
+                }
+                return null;
+            });
+            return registerPlugin(descriptor, checksum, provider, loader);
+        } catch (PluginLoadException failure) {
+            discovery.closeFailedLoad(provider, loader);
+            throw failure;
+        } catch (ServiceConfigurationError | LinkageError | RuntimeException failure) {
+            discovery.closeFailedLoad(provider, loader);
+            throw new PluginLoadException("Risk plugin artifact failed validation: " + artifactName,
+                    failure);
+        }
     }
 
     public PluginBinding binding(UUID tenantId, Capability capability) {

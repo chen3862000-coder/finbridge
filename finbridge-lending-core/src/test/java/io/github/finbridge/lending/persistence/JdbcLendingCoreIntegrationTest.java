@@ -1,8 +1,10 @@
 package io.github.finbridge.lending.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.finbridge.lending.application.LendingCoreException;
@@ -22,6 +24,9 @@ import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
+import java.sql.Connection;
+import java.sql.SQLException;
+import org.mockito.Mockito;
 import org.flywaydb.core.Flyway;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -65,6 +70,8 @@ class JdbcLendingCoreIntegrationTest {
         jdbc.update("DELETE FROM repayment_installments");
         jdbc.update("DELETE FROM repayment_plans");
         jdbc.update("DELETE FROM loans");
+        jdbc.update("DELETE FROM origination_workflow_steps");
+        jdbc.update("DELETE FROM origination_workflows");
         jdbc.update("DELETE FROM risk_assessments");
         jdbc.update("DELETE FROM loan_applications");
         jdbc.update("DELETE FROM tenants WHERE tenant_id <> ?", tenantId);
@@ -197,6 +204,164 @@ class JdbcLendingCoreIntegrationTest {
         assertEquals(AssessmentDecision.APPROVE, loaded.decision());
         assertEquals("creditscorex", loaded.providers().getFirst().pluginId());
         assertEquals(List.of("SCORE_ACCEPTABLE"), loaded.reasonCodes());
+    }
+
+    @Test
+    void durableRiskWorkflowClaimsAndCompletesAtomicallyWithDecision() {
+        applicationRepository.insert(application, "workflow-key", "j".repeat(64));
+        OriginationWorkflowRepository workflowRepository = aggregateRepository;
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        var workflow = workflowRepository.startRisk(tenantId, application.applicationId(), now);
+        assertEquals(OriginationWorkflowState.RISK_RUNNING, workflow.state());
+        assertEquals(ApplicationStatus.RISK_EVALUATING,
+                applicationRepository.find(tenantId, application.applicationId()).orElseThrow().status());
+        var claim = assessmentRepository.claimAssessment(tenantId, application.applicationId(),
+                workflow.activeAssessmentId(), workflow.workflowId(), workflow.activeRiskAttemptId(),
+                workflow.version(), List.of(), now);
+        UUID assessmentId = claim.assessment().assessmentId();
+        assertEquals(AssessmentStatus.PENDING, claim.assessment().status());
+        var reference = new RiskAssessment.ProviderExecutionReference(UUID.randomUUID(),
+                "creditscorex", "1.0.0", "CREDIT_SCORE");
+        var completed = new RiskAssessment(assessmentId, application.applicationId(), tenantId,
+                AssessmentStatus.COMPLETED, 720, false, "NONE", AssessmentDecision.APPROVE,
+                List.of("MANDATORY_RISK_DATA_CLEAR"), List.of(reference), "demo-risk-policy-1",
+                now, now.plusSeconds(1));
+        RiskAssessment saved = assessmentRepository.completeAndRecord(completed,
+                AssessmentDecision.APPROVE, workflow.activeRiskAttemptId(), 1, workflow.version(),
+                now.plusSeconds(1));
+        assertEquals(AssessmentDecision.APPROVE, saved.decision());
+        assertEquals(ApplicationStatus.APPROVED,
+                applicationRepository.find(tenantId, application.applicationId()).orElseThrow().status());
+        assertEquals(OriginationWorkflowState.RISK_COMPLETED,
+                workflowRepository.findByApplication(tenantId, application.applicationId()).orElseThrow().state());
+        assertEquals("COMPLETED", jdbc.queryForObject(
+                "SELECT state FROM origination_workflow_steps WHERE attempt_id = ?",
+                String.class, workflow.activeRiskAttemptId()));
+    }
+
+    @Test
+    void startRiskIsIdempotentWhenWorkflowWasCompletedConcurrently() {
+        applicationRepository.insert(application, "workflow-start-replay-key", "o".repeat(64));
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        OriginationWorkflow started = aggregateRepository.startRisk(
+                tenantId, application.applicationId(), now);
+        var claim = assessmentRepository.claimAssessment(tenantId, application.applicationId(),
+                started.activeAssessmentId(), started.workflowId(), started.activeRiskAttemptId(),
+                started.version(), List.of(), now);
+        RiskAssessment completed = new RiskAssessment(claim.assessment().assessmentId(),
+                application.applicationId(), tenantId, AssessmentStatus.COMPLETED, 720, false, "NONE",
+                AssessmentDecision.APPROVE, List.of("CLEAR"), List.of(), "demo-risk-policy-1",
+                now, now.plusSeconds(1));
+        assessmentRepository.completeAndRecord(completed, AssessmentDecision.APPROVE,
+                started.activeRiskAttemptId(), 1, started.version(), now.plusSeconds(1));
+
+        OriginationWorkflow replay = aggregateRepository.startRisk(
+                tenantId, application.applicationId(), now.plusSeconds(2));
+
+        assertEquals(OriginationWorkflowState.RISK_COMPLETED, replay.state());
+        assertEquals(completed.assessmentId(), replay.completedAssessmentId());
+    }
+
+    @Test
+    void workflowResumeRejectsMissingWorkflowAndUnsupportedState() {
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.resumeRisk(
+                tenantId, UUID.randomUUID(), Instant.parse("2026-01-02T00:00:00Z")));
+        applicationRepository.insert(application, "workflow-invalid-resume-key", "p".repeat(64));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.resumeRisk(
+                tenantId, application.applicationId(), Instant.parse("2026-01-02T00:00:00Z")));
+    }
+
+    @Test
+    void startRiskRejectsMissingApplication() {
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.startRisk(
+                tenantId, UUID.randomUUID(), Instant.parse("2026-01-02T00:00:00Z")));
+    }
+
+    @Test
+    void rollbackFailureIsSuppressedOnOriginalFailure() throws SQLException {
+        Connection connection = Mockito.mock(Connection.class);
+        SQLException rollbackFailure = new SQLException("synthetic rollback failure");
+        RuntimeException originalFailure = new RuntimeException("synthetic transaction failure");
+        Mockito.doThrow(rollbackFailure).when(connection).rollback();
+
+        JdbcRiskAssessmentRepository.rollback(connection, originalFailure);
+
+        assertSame(rollbackFailure, originalFailure.getSuppressed()[0]);
+    }
+
+    @Test
+    void interruptedRiskStepCanBeRetriedWithoutLosingWorkflowHistory() {
+        applicationRepository.insert(application, "workflow-retry-key", "k".repeat(64));
+        OriginationWorkflowRepository workflowRepository = aggregateRepository;
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        var first = workflowRepository.startRisk(tenantId, application.applicationId(), now);
+        assessmentRepository.claimAssessment(tenantId, application.applicationId(),
+                first.activeAssessmentId(), first.workflowId(), first.activeRiskAttemptId(),
+                first.version(), List.of(), now);
+        var second = workflowRepository.resumeRisk(tenantId, application.applicationId(), now.plusSeconds(5));
+        assertNotEquals(first.activeRiskAttemptId(), second.activeRiskAttemptId());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM origination_workflow_steps "
+                + "WHERE workflow_id = ? AND state = 'INTERRUPTED'", Integer.class, first.workflowId()));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM origination_workflow_steps "
+                + "WHERE workflow_id = ?", Integer.class, first.workflowId()));
+    }
+
+    @Test
+    void workflowCompletionRollsBackWhenOptimisticApplicationVersionIsStale() {
+        applicationRepository.insert(application, "workflow-rollback-key", "l".repeat(64));
+        OriginationWorkflowRepository workflowRepository = aggregateRepository;
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        var workflow = workflowRepository.startRisk(tenantId, application.applicationId(), now);
+        UUID assessmentId = workflow.activeAssessmentId();
+        assessmentRepository.claimAssessment(tenantId, application.applicationId(), assessmentId,
+                workflow.workflowId(), workflow.activeRiskAttemptId(), workflow.version(), List.of(), now);
+        var completed = new RiskAssessment(assessmentId, application.applicationId(), tenantId,
+                AssessmentStatus.COMPLETED, 720, false, "NONE", AssessmentDecision.APPROVE,
+                List.of("CLEAR"), List.of(), "demo-risk-policy-1", now, now.plusSeconds(1));
+
+        assertThrows(LendingCoreException.class, () -> assessmentRepository.completeAndRecord(
+                completed, AssessmentDecision.APPROVE, workflow.activeRiskAttemptId(), 999,
+                workflow.version(), now.plusSeconds(1)));
+        assertEquals(AssessmentStatus.PENDING,
+                assessmentRepository.findById(tenantId, assessmentId).orElseThrow().status());
+        assertEquals(OriginationWorkflowState.RISK_RUNNING,
+                workflowRepository.findByApplication(tenantId, application.applicationId()).orElseThrow().state());
+    }
+
+    @Test
+    void completedAssessmentClaimReplaysPersistedDecision() {
+        applicationRepository.insert(application, "workflow-replay-key", "m".repeat(64));
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        OriginationWorkflow workflow = aggregateRepository.startRisk(
+                tenantId, application.applicationId(), now);
+        var claim = assessmentRepository.claimAssessment(tenantId, application.applicationId(),
+                workflow.activeAssessmentId(), workflow.workflowId(), workflow.activeRiskAttemptId(),
+                workflow.version(), List.of(), now);
+        RiskAssessment completed = new RiskAssessment(claim.assessment().assessmentId(),
+                application.applicationId(), tenantId, AssessmentStatus.COMPLETED, 720, false, "NONE",
+                AssessmentDecision.APPROVE, List.of("CLEAR"), List.of(), "demo-risk-policy-1",
+                now, now.plusSeconds(1));
+        assessmentRepository.completeAndRecord(completed, AssessmentDecision.APPROVE,
+                workflow.activeRiskAttemptId(), 1, workflow.version(), now.plusSeconds(1));
+
+        var replay = assessmentRepository.claimAssessment(tenantId, application.applicationId(),
+                workflow.activeAssessmentId(), workflow.workflowId(), workflow.activeRiskAttemptId(),
+                workflow.version(), List.of(), now.plusSeconds(2));
+
+        assertTrue(replay.completed());
+        assertEquals(AssessmentDecision.APPROVE, replay.assessment().decision());
+    }
+
+    @Test
+    void riskClaimRejectsStaleWorkflowAttempt() {
+        applicationRepository.insert(application, "workflow-stale-claim-key", "n".repeat(64));
+        Instant now = Instant.parse("2026-01-02T00:00:00Z");
+        OriginationWorkflow workflow = aggregateRepository.startRisk(
+                tenantId, application.applicationId(), now);
+
+        assertThrows(LendingCoreException.class, () -> assessmentRepository.claimAssessment(
+                tenantId, application.applicationId(), workflow.activeAssessmentId(),
+                workflow.workflowId(), UUID.randomUUID(), workflow.version(), List.of(), now));
     }
 
     @Test
