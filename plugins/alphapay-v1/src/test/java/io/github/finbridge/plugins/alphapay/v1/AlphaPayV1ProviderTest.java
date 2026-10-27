@@ -25,9 +25,23 @@ class AlphaPayV1ProviderTest {
                 context());
         assertEquals("alphapay-private-v1-" + transactionId, result.providerTransactionId());
         assertEquals(PaymentStatus.SUCCEEDED,
-                provider.queryStatus(new PaymentTransactionRef(result.providerTransactionId()), context()));
+                provider.queryStatus(new PaymentTransactionRef(result.providerTransactionId()), context()).status());
         assertEquals(PaymentStatus.UNKNOWN,
-                provider.queryStatus(new PaymentTransactionRef("alphapay-private-v2-old"), context()));
+                provider.queryStatus(new PaymentTransactionRef("alphapay-private-v2-old"), context()).status());
+        assertEquals(PaymentStatus.SUCCEEDED, provider.queryStatus(PaymentTransactionRef
+                .byClientReference(UUID.randomUUID(), "key"), context()).status());
+        assertEquals(PaymentStatus.PROCESSING, provider.queryStatus(PaymentTransactionRef
+                .byClientReference(UUID.randomUUID(), "demo-processing-1"), context()).status());
+        assertEquals(PaymentStatus.FAILED, provider.queryStatus(PaymentTransactionRef
+                .byClientReference(UUID.randomUUID(), "demo-failed-1"), context()).status());
+        assertEquals(PaymentStatus.UNKNOWN, provider.queryStatus(PaymentTransactionRef
+                .byClientReference(UUID.randomUUID(), "demo-unknown-1"), context()).status());
+        assertEquals(PaymentStatus.PROCESSING, provider.disburse(new DisbursementRequest(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("100.00"),
+                Currency.getInstance("CNY"), "demo-processing-dispatch"), context()).status());
+        assertEquals(PaymentStatus.FAILED, provider.disburse(new DisbursementRequest(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("100.00"),
+                Currency.getInstance("CNY"), "demo-failed-dispatch"), context()).status());
         CollectionRequest collection = new CollectionRequest(UUID.randomUUID(),
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("20.00"),
                 Currency.getInstance("CNY"), "collect-key");

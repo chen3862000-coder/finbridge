@@ -1,7 +1,7 @@
 # ADR-009: Loan Activation After Confirmed Disbursement
 
-- **Status:** Accepted design constraint; activation operation is deferred to M4
-- **Date:** 2026-10-26
+- **Status:** Accepted and implemented for M4
+- **Date:** 2026-10-27
 
 ## Context
 

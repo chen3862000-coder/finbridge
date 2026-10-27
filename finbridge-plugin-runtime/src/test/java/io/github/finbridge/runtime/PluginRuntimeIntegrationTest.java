@@ -50,14 +50,14 @@ class PluginRuntimeIntegrationTest {
         runtime.activate(v2.key());
         try (PluginInvocationLease leaseV1 = v1.acquire(InvocationKind.BUSINESS);
              PluginInvocationLease leaseV2 = v2.acquire(InvocationKind.BUSINESS)) {
-            PaymentStatus resultV1 = leaseV1.invoke(provider -> ((PaymentProvider) provider)
+            var resultV1 = leaseV1.invoke(provider -> ((PaymentProvider) provider)
                     .queryStatus(new PaymentTransactionRef("alphapay-private-v1-transaction"),
                             context()));
-            PaymentStatus resultV2 = leaseV2.invoke(provider -> ((PaymentProvider) provider)
+            var resultV2 = leaseV2.invoke(provider -> ((PaymentProvider) provider)
                     .queryStatus(new PaymentTransactionRef("alphapay-private-v2-transaction"),
                             context()));
-            assertEquals(PaymentStatus.SUCCEEDED, resultV1);
-            assertEquals(PaymentStatus.SUCCEEDED, resultV2);
+            assertEquals(PaymentStatus.SUCCEEDED, resultV1.status());
+            assertEquals(PaymentStatus.SUCCEEDED, resultV2.status());
 
             Class<?> helperV1 = loadPrivateHelper(leaseV1);
             Class<?> helperV2 = loadPrivateHelper(leaseV2);
@@ -255,9 +255,10 @@ class PluginRuntimeIntegrationTest {
             }
 
             @Override
-            public PaymentStatus queryStatus(PaymentTransactionRef transaction,
-                                             OperationContext context) {
-                return PaymentStatus.UNKNOWN;
+            public io.github.finbridge.spi.payment.PaymentResult queryStatus(
+                    PaymentTransactionRef transaction, OperationContext context) {
+                return new io.github.finbridge.spi.payment.PaymentResult(
+                        PaymentStatus.UNKNOWN, null, null, null);
             }
 
             @Override

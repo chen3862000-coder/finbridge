@@ -374,6 +374,8 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 
 - Implement AlphaPay v1/v2 and BetaPay; payment transactions, idempotency, owner pinning, workflow persistence/recovery, disbursement/reconciliation, activation, crash/timeout/concurrency tests.
 
+**M4 implementation status:** Implemented and verified in the current workspace. AlphaPay v1/v2 and BetaPay are external synthetic payment artifacts. Reconciliation supports the provider transaction ID or the client idempotency key paired with the persisted payment transaction ID. Ambiguous dispatch is query-only; automatic retry/failover is not supported. The full JDK 21 root `clean verify` passed; see accepted ADR-007, ADR-009, and the M4 review record in `docs/quality/architecture-review-checklist.md`. Host lifecycle wiring for unresolved-owner retention remains M5 work.
+
 ### M5 — Hot Swap, Security, and Observability
 
 - Implement upgrades/rollback, draining, retention, authorization, tenant isolation, audit, metrics/traces, runtime recovery, and lifecycle/security tests.

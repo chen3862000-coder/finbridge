@@ -1,7 +1,7 @@
 # ADR-007: Payment Transaction Ownership
 
-- **Status:** Proposed, awaiting M0 approval
-- **Date:** 2026-10-26
+- **Status:** Accepted for M4 implementation
+- **Date:** 2026-10-27
 
 ## Context
 
@@ -9,7 +9,9 @@ Payment outcome may be ambiguous after timeout or host failure. Tenant bindings 
 
 ## Decision
 
-Before provider invocation, persist a unique idempotency claim, canonical request fingerprint, and selected plugin ID/version. Persist subsequent result against that owner. Duplicate matching requests do not invoke again; conflicting payloads fail. Ambiguous outcomes become `UNKNOWN` and can be reconciled only through the original provider version. Unresolved transactions prevent artifact unload.
+Before provider invocation, persist a unique idempotency claim, canonical request fingerprint, and selected plugin ID/version. Persist subsequent result against that owner. Duplicate matching requests do not invoke again; conflicting payloads fail. Ambiguous outcomes become `UNKNOWN` and can be reconciled only through the original provider version. Lending Core exposes a predicate for unresolved transactions by owner, and the runtime drain/unload API accepts a retention policy that can use it. Host lifecycle composition that supplies this policy remains M5 work.
+
+Reconciliation accepts exactly one reference: the provider transaction ID when known, or the host payment transaction ID together with the original client idempotency key when the response was lost. Status queries return a typed `PaymentResult` so a success discovered by either reference includes its provider transaction ID. An in-flight durable dispatch found on a repeated command or after restart is changed to `UNKNOWN` and is never resubmitted. Definitive `FAILED` is terminal in M4; a new payment intent/retry policy is not implemented.
 
 ## Alternatives
 
@@ -24,7 +26,7 @@ Persisted ownership survives route upgrades and restart. Unique constraints and 
 
 ## Consequences
 
-- Provider artifacts must be retained while transactions are unresolved.
+- Deployment operations must retain provider artifacts while transactions are unresolved; M5 will wire the host lifecycle policy to the Lending Core predicate.
 - Missing original artifacts block reconciliation and need an operational alert.
 - The guarantee is bounded to host idempotency behavior; it is not settlement exactly-once.
 
@@ -32,6 +34,7 @@ Persisted ownership survives route upgrades and restart. Unique constraints and 
 
 - Provider-side idempotency behavior may differ or be absent.
 - A crash around the side effect can leave UNKNOWN indefinitely without provider status support.
+- The host cannot prove the network call was not started once the dispatch claim committed; all such recovery is conservative and query-only.
 
 ## Revisit Conditions
 

@@ -61,12 +61,17 @@ public class LoanOriginationService {
         RepaymentPlan plan = new RepaymentPlan(planId, loanId, tenantId, loan.principal(),
                 totalInterest, loan.principal().add(totalInterest), loan.termMonths(),
                 RepaymentPlanStatus.PENDING_ACTIVATION, createdAt, null, installments);
-        return aggregates.originate(loan, plan);
+        return aggregates.originateApproved(loan, plan);
     }
 
     public Loan getLoan(UUID tenantId, UUID loanId) {
         return aggregates.findLoan(tenantId, loanId)
                 .orElseThrow(() -> new LendingCoreException("Loan was not found"));
+    }
+
+    public LendingAggregateRepository.DisbursementClaim getDisbursement(UUID tenantId, UUID loanId) {
+        return aggregates.findDisbursement(tenantId, loanId)
+                .orElseThrow(() -> new LendingCoreException("Disbursement was not found"));
     }
 
     private static final class ApplicationLookupBoundary implements LoanApplicationLookup {

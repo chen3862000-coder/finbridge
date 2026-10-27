@@ -110,6 +110,12 @@ class PluginContractsTest {
         PaymentTransactionRef transactionRef = new PaymentTransactionRef("provider-ref");
         assertEquals("provider-ref", transactionRef.providerTransactionId());
         assertThrows(IllegalArgumentException.class, () -> new PaymentTransactionRef(" "));
+        PaymentTransactionRef clientReference = PaymentTransactionRef.byClientReference(
+                UUID.randomUUID(), "payment-key");
+        assertFalse(clientReference.hasProviderTransactionId());
+        assertEquals("payment-key", clientReference.idempotencyKey());
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaymentTransactionRef(null, UUID.randomUUID(), " "));
         assertEquals(RiskDataType.BLACKLIST, new BlacklistValue(true).dataType());
         assertEquals(RiskDataType.FRAUD_SIGNAL,
                 new FraudSignalValue(FraudSignalValue.Severity.NONE, "CLEAR").dataType());

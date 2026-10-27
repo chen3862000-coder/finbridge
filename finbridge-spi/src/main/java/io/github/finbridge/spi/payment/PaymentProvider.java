@@ -8,5 +8,5 @@ public interface PaymentProvider extends FinBridgePlugin {
 
     PaymentResult collect(CollectionRequest request, OperationContext context);
 
-    PaymentStatus queryStatus(PaymentTransactionRef transaction, OperationContext context);
+    PaymentResult queryStatus(PaymentTransactionRef transaction, OperationContext context);
 }

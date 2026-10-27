@@ -1,6 +1,7 @@
 package io.github.finbridge.lending.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +16,9 @@ import io.github.finbridge.lending.domain.InstallmentStatus;
 import io.github.finbridge.lending.domain.Loan;
 import io.github.finbridge.lending.domain.LoanApplication;
 import io.github.finbridge.lending.domain.LoanStatus;
+import io.github.finbridge.lending.domain.PaymentTransactionStatus;
+import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.spi.payment.PaymentStatus;
 import io.github.finbridge.lending.domain.RepaymentInstallment;
 import io.github.finbridge.lending.domain.RepaymentPlan;
 import io.github.finbridge.lending.domain.RepaymentPlanStatus;
@@ -67,14 +71,11 @@ class JdbcLendingCoreIntegrationTest {
         aggregateRepository = new JdbcLendingAggregateRepository(dataSource);
         assessmentRepository = new JdbcRiskAssessmentRepository(dataSource, new ObjectMapper());
         tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
-        jdbc.update("DELETE FROM repayment_installments");
-        jdbc.update("DELETE FROM repayment_plans");
-        jdbc.update("DELETE FROM loans");
-        jdbc.update("DELETE FROM origination_workflow_steps");
-        jdbc.update("DELETE FROM origination_workflows");
-        jdbc.update("DELETE FROM risk_assessments");
-        jdbc.update("DELETE FROM loan_applications");
-        jdbc.update("DELETE FROM tenants WHERE tenant_id <> ?", tenantId);
+        jdbc.execute("TRUNCATE TABLE payment_transactions, repayment_installments, repayment_plans, "
+                + "loans, origination_workflow_steps, origination_workflows, risk_assessments, "
+                + "loan_applications CASCADE");
+        jdbc.update("INSERT INTO tenants (tenant_id, tenant_code) VALUES (?, ?) "
+                        + "ON CONFLICT (tenant_id) DO NOTHING", tenantId, "DEMO_ALPHA");
         jdbc.update("INSERT INTO loan_products (product_code, product_version, currency, "
                         + "minimum_principal, maximum_principal, allowed_terms_months, "
                         + "annual_interest_rate_percent, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
@@ -290,6 +291,17 @@ class JdbcLendingCoreIntegrationTest {
     }
 
     @Test
+    void repositoryRequiredResultGuardsFailClosed() {
+        assertThrows(LendingCoreException.class,
+                () -> JdbcLendingAggregateRepository.requireOne(0, "synthetic optimistic miss"));
+        assertThrows(LendingCoreException.class,
+                () -> JdbcDisbursementRepository.requireOne(0, "synthetic payment update miss"));
+        assertThrows(LendingCoreException.class,
+                () -> JdbcDisbursementRepository.requirePresent(
+                        java.util.Optional.empty(), "synthetic required payment row"));
+    }
+
+    @Test
     void interruptedRiskStepCanBeRetriedWithoutLosingWorkflowHistory() {
         applicationRepository.insert(application, "workflow-retry-key", "k".repeat(64));
         OriginationWorkflowRepository workflowRepository = aggregateRepository;
@@ -362,6 +374,362 @@ class JdbcLendingCoreIntegrationTest {
         assertThrows(LendingCoreException.class, () -> assessmentRepository.claimAssessment(
                 tenantId, application.applicationId(), workflow.activeAssessmentId(),
                 workflow.workflowId(), UUID.randomUUID(), workflow.version(), List.of(), now));
+    }
+
+    @Test
+    void durableDisbursementPinsOwnerAndActivatesLoanPlanOnlyAfterPersistedSuccess() {
+        Loan loan = prepareApprovedLoan("payment-application");
+        Instant now = Instant.parse("2026-03-01T10:00:02Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        String idempotencyKey = "disburse-success-key";
+        String fingerprint = "a".repeat(64);
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), idempotencyKey, fingerprint, UUID.randomUUID(), now.plusSeconds(2));
+
+        assertTrue(claim.dispatchClaimed());
+        assertEquals(LoanStatus.DISBURSEMENT_PROCESSING, claim.loan().status());
+        assertEquals(RepaymentPlanStatus.PENDING_ACTIVATION, claim.plan().status());
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+        var replay = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), idempotencyKey, fingerprint, UUID.randomUUID(), now.plusSeconds(3));
+        assertFalse(replay.dispatchClaimed());
+        assertEquals(claim.transaction().paymentTransactionId(), replay.transaction().paymentTransactionId());
+        var succeeded = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "alphapay-private-v1-transaction", null,
+                now.plusSeconds(4), java.time.LocalDate.of(2026, 3, 1), now.plusSeconds(4));
+
+        var replayedSuccess = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "alphapay-private-v1-transaction", null,
+                now.plusSeconds(4), java.time.LocalDate.of(2026, 3, 1), now.plusSeconds(5));
+
+        assertEquals(PaymentTransactionStatus.SUCCEEDED, succeeded.transaction().status());
+        assertEquals(LoanStatus.ACTIVE, replayedSuccess.loan().status());
+        assertEquals(LoanStatus.ACTIVE, aggregateRepository.findLoan(tenantId, loan.loanId())
+                .orElseThrow().status());
+        RepaymentPlan activePlan = aggregateRepository.findRepaymentPlan(tenantId, loan.loanId())
+                .orElseThrow();
+        assertEquals(RepaymentPlanStatus.ACTIVE, activePlan.status());
+        assertEquals(java.time.LocalDate.of(2026, 4, 1), activePlan.installments().getFirst().dueDate());
+        assertEquals(ApplicationStatus.ORIGINATED, applicationRepository.find(tenantId,
+                loan.applicationId()).orElseThrow().status());
+        assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+    }
+
+    @Test
+    void ambiguousDisbursementRequiresOwnerReconciliationAndNeverRedispatches() {
+        Loan loan = prepareApprovedLoan("payment-unknown-app");
+        Instant now = Instant.parse("2026-03-02T10:00:00Z");
+        PluginKey originalOwner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), originalOwner,
+                UUID.randomUUID(), "ambiguous-key", "b".repeat(64), UUID.randomUUID(), now);
+        var unknown = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.UNKNOWN, null, "PAYMENT_PROVIDER_TIMEOUT", null, null, now.plusSeconds(1));
+
+        assertEquals(PaymentTransactionStatus.UNKNOWN, unknown.transaction().status());
+        assertEquals(LoanStatus.DISBURSEMENT_PROCESSING, unknown.loan().status());
+        assertEquals(OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED, unknown.workflow().state());
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(originalOwner));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), new PluginKey("alphapay", "2.0.0"), UUID.randomUUID(),
+                "ambiguous-key", "b".repeat(64), UUID.randomUUID(), now.plusSeconds(2)));
+        var unresolvedReplay = aggregateRepository.claimDisbursement(tenantId, loan.loanId(),
+                originalOwner, UUID.randomUUID(), "ambiguous-key", "b".repeat(64),
+                UUID.randomUUID(), now.plusSeconds(2));
+        assertFalse(unresolvedReplay.dispatchClaimed());
+        assertEquals(PaymentTransactionStatus.UNKNOWN, unresolvedReplay.transaction().status());
+
+        var resolved = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "alphapay-private-v1-reconciled", null,
+                now.plusSeconds(3), java.time.LocalDate.of(2026, 3, 2), now.plusSeconds(3));
+
+        assertEquals(LoanStatus.ACTIVE, aggregateRepository.findLoan(tenantId, loan.loanId())
+                .orElseThrow().status());
+        assertEquals(OriginationWorkflowState.ORIGINATED, resolved.workflow().state());
+        assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(originalOwner));
+    }
+
+    @Test
+    void interruptedDisbursementIsPersistedUnknownAndTenantScopedLookupsFindIt() {
+        Loan loan = prepareApprovedLoan("payment-interrupted-app");
+        Instant now = Instant.parse("2026-03-02T11:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        String idempotencyKey = "interrupted-dispatch-key";
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), idempotencyKey, "f".repeat(64), UUID.randomUUID(), now);
+
+        var interrupted = aggregateRepository.markInterruptedDispatchUnknown(tenantId,
+                claim.transaction().paymentTransactionId(), now.plusSeconds(1));
+
+        assertEquals(PaymentTransactionStatus.UNKNOWN, interrupted.transaction().status());
+        assertEquals(interrupted.transaction(), aggregateRepository.findPaymentTransaction(tenantId,
+                claim.transaction().paymentTransactionId()).orElseThrow());
+        assertEquals(interrupted.transaction(), aggregateRepository.findPaymentByLoan(tenantId,
+                loan.loanId()).orElseThrow());
+        assertEquals(interrupted.transaction(), aggregateRepository.findPaymentByIdempotencyKey(
+                tenantId, idempotencyKey).orElseThrow());
+        assertEquals(interrupted.transaction(), aggregateRepository.findDisbursement(tenantId,
+                loan.loanId()).orElseThrow().transaction());
+        assertTrue(aggregateRepository.findPaymentTransaction(UUID.randomUUID(),
+                claim.transaction().paymentTransactionId()).isEmpty());
+        assertTrue(aggregateRepository.findPaymentByIdempotencyKey(UUID.randomUUID(),
+                idempotencyKey).isEmpty());
+    }
+
+    @Test
+    void missingDisbursementLookupIsEmptyAndStaleOutcomeCannotChangePayment() {
+        Loan loan = prepareApprovedLoan("payment-stale-attempt-app");
+        Instant now = Instant.parse("2026-03-02T11:30:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+
+        assertTrue(aggregateRepository.findDisbursement(tenantId, loan.loanId()).isEmpty());
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "stale-attempt-key", "a".repeat(64), UUID.randomUUID(), now);
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.recordDisbursementOutcome(
+                tenantId, claim.transaction().paymentTransactionId(), UUID.randomUUID(),
+                PaymentStatus.SUCCEEDED, "stale-provider-ref", null, now.plusSeconds(1),
+                java.time.LocalDate.of(2026, 3, 2), now.plusSeconds(1)));
+        assertEquals(PaymentTransactionStatus.SUBMISSION_IN_PROGRESS,
+                aggregateRepository.findPaymentTransaction(tenantId,
+                        claim.transaction().paymentTransactionId()).orElseThrow().status());
+    }
+
+    @Test
+    void existingPaymentReplayRejectsChangedFingerprintAndOwner() {
+        Loan loan = prepareApprovedLoan("payment-replay-conflict-app");
+        Instant now = Instant.parse("2026-03-02T11:45:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        String key = "payment-replay-conflict-key";
+        aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner, UUID.randomUUID(),
+                key, "b".repeat(64), UUID.randomUUID(), now);
+
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), owner, UUID.randomUUID(), key, "c".repeat(64),
+                UUID.randomUUID(), now.plusSeconds(1)));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), new PluginKey("alphapay", "2.0.0"), UUID.randomUUID(),
+                key, "b".repeat(64), UUID.randomUUID(), now.plusSeconds(1)));
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+    }
+
+    @Test
+    void processingPaymentOutcomeRemainsUnresolvedForReconciliation() {
+        Loan loan = prepareApprovedLoan("payment-processing-app");
+        Instant now = Instant.parse("2026-03-02T12:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "processing-payment-key", "a".repeat(64), UUID.randomUUID(), now);
+
+        var processing = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.PROCESSING, null, null, null, null, now.plusSeconds(1));
+        var providerProcessing = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.PROCESSING, null, null, null, null, now.plusSeconds(2));
+
+        assertEquals(PaymentTransactionStatus.UNKNOWN, processing.transaction().status());
+        assertEquals(PaymentTransactionStatus.PROCESSING, providerProcessing.transaction().status());
+        assertEquals(OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED, providerProcessing.workflow().state());
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+    }
+
+    @Test
+    void compatibilityDisbursementClaimCreatesTransactionIdentity() {
+        Loan loan = prepareApprovedLoan("payment-compatibility-claim-app");
+        Instant now = Instant.parse("2026-03-02T13:00:00Z");
+
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(),
+                new PluginKey("alphapay", "1.0.0"), "compatibility-payment-key",
+                "e".repeat(64), UUID.randomUUID(), now);
+
+        assertTrue(claim.dispatchClaimed());
+        assertTrue(aggregateRepository.findPaymentTransaction(tenantId,
+                claim.transaction().paymentTransactionId()).isPresent());
+    }
+
+    @Test
+    void definitivePaymentFailureIsTerminalAndDoesNotActivatePlan() {
+        Loan loan = prepareApprovedLoan("payment-failed-app");
+        Instant now = Instant.parse("2026-03-03T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "definitive-failure-key", "c".repeat(64), UUID.randomUUID(), now);
+        var failed = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.FAILED, null, "DECLINED", null, null, now.plusSeconds(1));
+
+        assertEquals(PaymentTransactionStatus.FAILED, failed.transaction().status());
+        assertEquals(LoanStatus.DISBURSEMENT_FAILED, failed.loan().status());
+        assertEquals(RepaymentPlanStatus.PENDING_ACTIVATION, failed.plan().status());
+        assertEquals(OriginationWorkflowState.PAYMENT_FAILED, failed.workflow().state());
+        assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), owner, UUID.randomUUID(), "new-retry-key", "c".repeat(64),
+                UUID.randomUUID(), now.plusSeconds(2)));
+    }
+
+    @Test
+    void paymentClaimRejectsWrongPayloadOwnerAndPriorIntentReplay() {
+        Loan loan = prepareApprovedLoan("payment-conflict-app");
+        Instant now = Instant.parse("2026-03-05T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "conflict-key", "f".repeat(64), UUID.randomUUID(), now);
+
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), owner, UUID.randomUUID(), "conflict-key", "e".repeat(64),
+                UUID.randomUUID(), now.plusSeconds(1)));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), new PluginKey("alphapay", "2.0.0"), UUID.randomUUID(),
+                "conflict-key", "f".repeat(64), UUID.randomUUID(), now.plusSeconds(1)));
+
+        var replay = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "conflict-key", "f".repeat(64), UUID.randomUUID(), now.plusSeconds(2));
+
+        assertEquals(claim.transaction().paymentTransactionId(), replay.transaction().paymentTransactionId());
+        assertFalse(replay.dispatchClaimed());
+        assertEquals(PaymentTransactionStatus.UNKNOWN, replay.transaction().status());
+    }
+
+    @Test
+    void paymentClaimRejectsKeyOwnedByDifferentLoan() {
+        Loan firstLoan = prepareApprovedLoan("payment-key-owner-first");
+        Instant now = Instant.parse("2026-03-08T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        aggregateRepository.claimDisbursement(tenantId, firstLoan.loanId(), owner,
+                UUID.randomUUID(), "shared-payment-key", "a".repeat(64), UUID.randomUUID(), now);
+        Loan secondLoan = prepareApprovedLoan("payment-key-owner-second");
+
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, secondLoan.loanId(), owner, UUID.randomUUID(), "shared-payment-key",
+                "a".repeat(64), UUID.randomUUID(), now.plusSeconds(1)));
+    }
+
+    @Test
+    void workflowAndLoanStatesMustBeReadyBeforePaymentClaim() {
+        Loan unapproved = prepareApplicationWithoutRisk("payment-not-ready-app");
+        aggregateRepository.originate(unapproved, plan(unapproved));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, unapproved.loanId(), new PluginKey("alphapay", "1.0.0"),
+                UUID.randomUUID(), "not-ready-key", "d".repeat(64), UUID.randomUUID(), Instant.now()));
+    }
+
+    @Test
+    void paymentClaimRejectsLoanOutsideDisbursementStates() {
+        Loan loan = prepareApprovedLoan("payment-invalid-loan-state");
+        jdbc.update("UPDATE loans SET status = 'DISBURSEMENT_FAILED' WHERE loan_id = ?", loan.loanId());
+
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.claimDisbursement(
+                tenantId, loan.loanId(), new PluginKey("alphapay", "1.0.0"), UUID.randomUUID(),
+                "invalid-loan-state-key", "a".repeat(64), UUID.randomUUID(), Instant.now()));
+    }
+
+    @Test
+    void persistedSuccessWithoutConfirmationCanBeRecoveredAndActivated() {
+        Loan loan = prepareApprovedLoan("payment-missing-confirmation");
+        Instant now = Instant.parse("2026-03-09T10:00:00Z");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(),
+                new PluginKey("alphapay", "1.0.0"), UUID.randomUUID(), "missing-confirmation-key",
+                "c".repeat(64), UUID.randomUUID(), now);
+
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.recordDisbursementOutcome(
+                tenantId, claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "recovered-provider-ref", null, null,
+                java.time.LocalDate.of(2026, 3, 9), now.plusSeconds(1)));
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.recordDisbursementOutcome(
+                tenantId, claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "recovered-provider-ref", null, now.plusSeconds(1),
+                null, now.plusSeconds(2)));
+
+        var recovered = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "recovered-provider-ref", null, now.plusSeconds(1),
+                java.time.LocalDate.of(2026, 3, 9), now.plusSeconds(3));
+        assertEquals(LoanStatus.ACTIVE, recovered.loan().status());
+        assertEquals(RepaymentPlanStatus.ACTIVE, recovered.plan().status());
+    }
+
+    @Test
+    void paymentOutcomeRejectsSupersededAttemptAndEmptyDisbursementLookupIsTenantSafe() {
+        assertTrue(aggregateRepository.findDisbursement(tenantId, UUID.randomUUID()).isEmpty());
+        Loan loan = prepareApprovedLoan("payment-stale-attempt-app");
+        Instant now = Instant.parse("2026-03-06T10:00:00Z");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(),
+                new PluginKey("alphapay", "1.0.0"), UUID.randomUUID(), "stale-attempt-key",
+                "a".repeat(64), UUID.randomUUID(), now);
+        assertThrows(LendingCoreException.class, () -> aggregateRepository.recordDisbursementOutcome(
+                tenantId, claim.transaction().paymentTransactionId(), UUID.randomUUID(),
+                PaymentStatus.SUCCEEDED, "provider-ref", null, now.plusSeconds(1),
+                java.time.LocalDate.of(2026, 3, 6), now.plusSeconds(1)));
+    }
+
+    @Test
+    void paymentOwnerRetentionOnlyBlocksUnresolvedTransactions() {
+        Loan loan = prepareApprovedLoan("payment-retention-app");
+        Instant now = Instant.parse("2026-03-07T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "retention-key", "f".repeat(64), UUID.randomUUID(), now);
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+
+        aggregateRepository.recordDisbursementOutcome(tenantId, claim.transaction().paymentTransactionId(),
+                claim.transaction().dispatchAttemptId(), PaymentStatus.FAILED, null, "DECLINED",
+                null, null, now.plusSeconds(1));
+
+        assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(owner));
+        assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(
+                new PluginKey("alphapay", "2.0.0")));
+    }
+
+    @Test
+    void persistedSuccessCanReplayLocalActivationAfterWorkflowCommitInterruption() {
+        Loan loan = prepareApprovedLoan("payment-replay-app");
+        Instant now = Instant.parse("2026-03-04T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "success-replay-key", "e".repeat(64), UUID.randomUUID(), now);
+        jdbc.update("UPDATE payment_transactions SET status = 'SUCCEEDED', "
+                        + "provider_transaction_id = ?, updated_at = ?, version = version + 1 "
+                        + "WHERE payment_transaction_id = ?",
+                "alphapay-private-v1-replay", java.sql.Timestamp.from(now.plusSeconds(1)),
+                claim.transaction().paymentTransactionId());
+
+        var replay = aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.SUCCEEDED, "alphapay-private-v1-replay", null,
+                now.plusSeconds(1), java.time.LocalDate.of(2026, 3, 4), now.plusSeconds(2));
+
+        assertEquals(LoanStatus.ACTIVE, replay.loan().status());
+        assertEquals(RepaymentPlanStatus.ACTIVE, replay.plan().status());
+        assertEquals(OriginationWorkflowState.ORIGINATED, replay.workflow().state());
+    }
+
+    private Loan prepareApprovedLoan(String key) {
+        UUID applicationId = UUID.randomUUID();
+        LoanApplication submitted = application(tenantId, applicationId, 0, ApplicationStatus.SUBMITTED);
+        applicationRepository.insert(submitted, key, "d".repeat(64));
+        Instant now = Instant.parse("2026-03-01T10:00:00Z");
+        OriginationWorkflow workflow = aggregateRepository.startRisk(tenantId, applicationId, now);
+        assessmentRepository.claimAssessment(tenantId, applicationId, workflow.activeAssessmentId(),
+                workflow.workflowId(), workflow.activeRiskAttemptId(), workflow.version(), List.of(), now);
+        RiskAssessment assessment = new RiskAssessment(workflow.activeAssessmentId(), applicationId,
+                tenantId, AssessmentStatus.COMPLETED, 720, false, "NONE", AssessmentDecision.APPROVE,
+                List.of("CLEAR"), List.of(), "demo-risk-policy-1", now, now.plusSeconds(1));
+        assessmentRepository.completeAndRecord(assessment, AssessmentDecision.APPROVE,
+                workflow.activeRiskAttemptId(), 1, workflow.version(), now.plusSeconds(1));
+        Loan loan = loan(application(tenantId, applicationId, 1, ApplicationStatus.APPROVED));
+        return aggregateRepository.originateApproved(loan, plan(loan));
+    }
+
+    private Loan prepareApplicationWithoutRisk(String key) {
+        UUID applicationId = UUID.randomUUID();
+        LoanApplication submitted = application(tenantId, applicationId, 0, ApplicationStatus.SUBMITTED);
+        applicationRepository.insert(submitted, key, "e".repeat(64));
+        Loan loan = loan(submitted);
+        return aggregateRepository.originate(loan, plan(loan));
     }
 
     @Test

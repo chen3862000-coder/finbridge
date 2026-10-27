@@ -46,6 +46,34 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return copy(LoanStatus.ACTIVE, disbursementTransactionId, confirmedAt, confirmedAt);
     }
 
+    public Loan recordPaymentIntent(UUID transactionId) {
+        Objects.requireNonNull(transactionId, "transactionId");
+        if (status != LoanStatus.PENDING_DISBURSEMENT) {
+            throw new IllegalStateException("Loan is not awaiting its first disbursement intent");
+        }
+        return copy(LoanStatus.DISBURSEMENT_PROCESSING, transactionId, null, null);
+    }
+
+    public Loan recordDisbursementFailure() {
+        if (status != LoanStatus.DISBURSEMENT_PROCESSING || disbursementTransactionId == null) {
+            throw new IllegalStateException("Loan has no active disbursement intent");
+        }
+        return copy(LoanStatus.DISBURSEMENT_FAILED, disbursementTransactionId, null, null);
+    }
+
+    public Loan confirmDisbursement(UUID transactionId, Instant confirmedAt) {
+        Objects.requireNonNull(transactionId, "transactionId");
+        Objects.requireNonNull(confirmedAt, "confirmedAt");
+        if (status == LoanStatus.ACTIVE && transactionId.equals(disbursementTransactionId)) {
+            return this;
+        }
+        if (status != LoanStatus.DISBURSEMENT_PROCESSING
+                || !transactionId.equals(disbursementTransactionId)) {
+            throw new IllegalStateException("Confirmed payment does not own this loan");
+        }
+        return activateAfterConfirmedDisbursement(confirmedAt);
+    }
+
     public Loan markDisbursementFailed() {
         if (status != LoanStatus.PENDING_DISBURSEMENT
                 && status != LoanStatus.DISBURSEMENT_PROCESSING) {

@@ -1,20 +1,23 @@
 package io.github.finbridge.lending.persistence;
 
+import io.github.finbridge.lending.application.LendingCoreException;
 import io.github.finbridge.lending.domain.InstallmentStatus;
 import io.github.finbridge.lending.domain.Loan;
 import io.github.finbridge.lending.domain.LoanApplication;
 import io.github.finbridge.lending.domain.LoanStatus;
+import io.github.finbridge.lending.domain.PaymentTransaction;
 import io.github.finbridge.lending.domain.RepaymentInstallment;
 import io.github.finbridge.lending.domain.RepaymentPlan;
 import io.github.finbridge.lending.domain.RepaymentPlanStatus;
-import io.github.finbridge.lending.application.LendingCoreException;
+import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.spi.payment.PaymentStatus;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.Currency;
 import java.util.List;
-import java.util.Optional;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,12 +30,14 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
         OriginationWorkflowRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
+    private final JdbcDisbursementRepository disbursements;
 
     public JdbcLendingAggregateRepository(DataSource dataSource) {
         this.jdbc = new JdbcTemplate(dataSource);
         PlatformTransactionManager transactionManager =
                 new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);
         this.transactions = new TransactionTemplate(transactionManager);
+        this.disbursements = new JdbcDisbursementRepository(jdbc, transactions, this);
     }
 
     @Override
@@ -55,11 +60,23 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
 
     @Override
     public Loan originate(Loan loan, RepaymentPlan plan) {
+        return persistLoanAndPlan(loan, plan, false);
+    }
+
+    @Override
+    public Loan originateApproved(Loan loan, RepaymentPlan plan) {
+        return persistLoanAndPlan(loan, plan, true);
+    }
+
+    private Loan persistLoanAndPlan(Loan loan, RepaymentPlan plan, boolean approvedWorkflow) {
         try {
             Loan persisted = transactions.execute(status -> {
                 insertLoan(loan);
                 insertPlan(plan);
                 insertInstallments(plan.installments());
+                if (approvedWorkflow) {
+                    advanceApprovedApplicationToPaymentPending(loan);
+                }
                 return loan;
             });
             return Objects.requireNonNull(persisted, "Persisted loan result");
@@ -70,10 +87,23 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
         }
     }
 
+    private void advanceApprovedApplicationToPaymentPending(Loan loan) {
+        int applicationUpdated = jdbc.update("UPDATE loan_applications SET status = 'ORIGINATION_IN_PROGRESS', "
+                        + "updated_at = ?, version = version + 1 WHERE tenant_id = ? AND application_id = ? "
+                        + "AND status = 'APPROVED'",
+                Timestamp.from(loan.createdAt()), loan.tenantId(), loan.applicationId());
+        requireOne(applicationUpdated, "Approved application changed before loan origination");
+        int workflowUpdated = jdbc.update("UPDATE origination_workflows SET state = 'PAYMENT_PENDING', "
+                        + "version = version + 1, updated_at = ? WHERE tenant_id = ? AND application_id = ? "
+                        + "AND state = 'RISK_COMPLETED' AND completed_assessment_id IS NOT NULL",
+                Timestamp.from(loan.createdAt()), loan.tenantId(), loan.applicationId());
+        requireOne(workflowUpdated, "Risk workflow is not ready for payment intent");
+    }
+
     @Override
     public OriginationWorkflow startRisk(UUID tenantId, UUID applicationId, java.time.Instant now) {
-        OriginationWorkflow workflow = transactions.execute(status -> startRiskTransaction(
-                tenantId, applicationId, now));
+        OriginationWorkflow workflow = transactions.execute(status ->
+                startRiskTransaction(tenantId, applicationId, now));
         return Objects.requireNonNull(workflow, "Workflow transaction result");
     }
 
@@ -90,11 +120,110 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
         return transactions.execute(status -> startRiskTransaction(tenantId, applicationId, now));
     }
 
+    @Override
+    public DisbursementClaim claimDisbursement(UUID tenantId, UUID loanId, PluginKey owner,
+            UUID transactionId, String idempotencyKey, String requestFingerprint,
+            UUID attemptId, java.time.Instant now) {
+        return disbursements.claimDisbursement(tenantId, loanId, owner, transactionId,
+                idempotencyKey, requestFingerprint, attemptId, now);
+    }
+
+    @Override
+    public DisbursementClaim claimDisbursement(UUID tenantId, UUID loanId, PluginKey owner,
+            String idempotencyKey, String requestFingerprint, UUID attemptId, java.time.Instant now) {
+        return claimDisbursement(tenantId, loanId, owner, UUID.randomUUID(), idempotencyKey,
+                requestFingerprint, attemptId, now);
+    }
+
+    @Override
+    public DisbursementClaim recordDisbursementOutcome(UUID tenantId, UUID paymentTransactionId,
+            UUID expectedAttemptId, PaymentStatus status, String providerTransactionId,
+            String diagnosticCode, java.time.Instant confirmedAt,
+            java.time.LocalDate disbursementDate, java.time.Instant now) {
+        return disbursements.recordOutcome(tenantId, paymentTransactionId, expectedAttemptId,
+                status, providerTransactionId, diagnosticCode, confirmedAt, disbursementDate, now);
+    }
+
+    @Override
+    public DisbursementClaim markInterruptedDispatchUnknown(UUID tenantId, UUID transactionId,
+            java.time.Instant now) {
+        return disbursements.markInterrupted(tenantId, transactionId, now);
+    }
+
+    @Override
+    public Optional<PaymentTransaction> findPaymentTransaction(UUID tenantId, UUID transactionId) {
+        return disbursements.findPaymentTransaction(tenantId, transactionId);
+    }
+
+    @Override
+    public Optional<PaymentTransaction> findPaymentByLoan(UUID tenantId, UUID loanId) {
+        return disbursements.findPaymentByLoan(tenantId, loanId);
+    }
+
+    @Override
+    public Optional<PaymentTransaction> findPaymentByIdempotencyKey(UUID tenantId, String key) {
+        return disbursements.findPaymentByIdempotencyKey(tenantId, key);
+    }
+
+    @Override
+    public Optional<DisbursementClaim> findDisbursement(UUID tenantId, UUID loanId) {
+        return disbursements.findDisbursement(tenantId, loanId);
+    }
+
+    @Override
+    public boolean hasUnresolvedPaymentOwner(PluginKey owner) {
+        return disbursements.hasUnresolvedPaymentOwner(owner);
+    }
+
+    OriginationWorkflow updateWorkflowPayment(OriginationWorkflow workflow, UUID transactionId,
+            OriginationWorkflowState state, java.time.Instant now) {
+        int updated = jdbc.update("UPDATE origination_workflows SET state = ?, "
+                        + "payment_transaction_id = ?, version = version + 1, updated_at = ? "
+                        + "WHERE workflow_id = ? AND version = ?",
+                state.name(), transactionId, Timestamp.from(now), workflow.workflowId(), workflow.version());
+        requireOne(updated, "Origination workflow payment transition lost optimistic race");
+        return new OriginationWorkflow(workflow.workflowId(), workflow.applicationId(),
+                workflow.tenantId(), state, workflow.activeRiskAttemptId(), workflow.activeAssessmentId(),
+                workflow.completedAssessmentId(), transactionId, workflow.version() + 1,
+                workflow.createdAt(), now);
+    }
+
+    Optional<Loan> findLoanForUpdate(UUID tenantId, UUID loanId) {
+        return jdbc.query("SELECT * FROM loans WHERE tenant_id = ? AND loan_id = ? FOR UPDATE",
+                this::mapLoan, tenantId, loanId).stream().findFirst();
+    }
+
+    void updateLoan(Loan loan, long expectedVersion) {
+        int updated = jdbc.update("UPDATE loans SET status = ?, disbursement_transaction_id = ?, "
+                        + "disbursed_at = ?, activated_at = ?, version = version + 1 "
+                        + "WHERE tenant_id = ? AND loan_id = ? AND version = ?",
+                loan.status().name(), loan.disbursementTransactionId(), timestamp(loan.disbursedAt()),
+                timestamp(loan.activatedAt()), loan.tenantId(), loan.loanId(), expectedVersion);
+        requireOne(updated, "Loan changed concurrently during disbursement");
+    }
+
+    OriginationWorkflow findWorkflowForUpdate(UUID tenantId, UUID applicationId) {
+        return jdbc.query("SELECT * FROM origination_workflows WHERE tenant_id = ? AND application_id = ? "
+                        + "FOR UPDATE", this::mapWorkflow, tenantId, applicationId)
+                .stream().findFirst().orElse(null);
+    }
+
+    OriginationWorkflow mapWorkflow(ResultSet row, int ignoredRowNumber) throws SQLException {
+        return new OriginationWorkflow(row.getObject("workflow_id", UUID.class),
+                row.getObject("application_id", UUID.class), row.getObject("tenant_id", UUID.class),
+                OriginationWorkflowState.valueOf(row.getString("state")),
+                row.getObject("active_risk_attempt_id", UUID.class),
+                row.getObject("active_assessment_id", UUID.class),
+                row.getObject("completed_assessment_id", UUID.class),
+                row.getObject("payment_transaction_id", UUID.class), row.getLong("version"),
+                row.getTimestamp("created_at").toInstant(), row.getTimestamp("updated_at").toInstant());
+    }
+
     private OriginationWorkflow startRiskTransaction(UUID tenantId, UUID applicationId,
-                                                      java.time.Instant now) {
+            java.time.Instant now) {
         LoanApplication application = jdbc.query("SELECT * FROM loan_applications "
                         + "WHERE tenant_id = ? AND application_id = ? FOR UPDATE",
-                this::mapApplicationForWorkflow, tenantId, applicationId).stream().findFirst()
+                this::mapApplication, tenantId, applicationId).stream().findFirst()
                 .orElseThrow(() -> new LendingCoreException("Loan application was not found"));
         OriginationWorkflow current = findWorkflowForUpdate(tenantId, applicationId);
         if (current != null && current.state() == OriginationWorkflowState.RISK_COMPLETED) {
@@ -110,12 +239,12 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
         }
         retirePendingAttempt(current, now);
         persistPendingAssessment(current, applicationId, tenantId, assessmentId, now);
-        persistWorkflowClaim(current, workflowId, applicationId, tenantId, attemptId, assessmentId,
-                version, now);
+        persistWorkflowClaim(current, workflowId, applicationId, tenantId, attemptId,
+                assessmentId, version, now);
         persistRiskStep(workflowId, attemptId, assessmentId, now);
         transitionApplicationToEvaluating(application, tenantId, applicationId, now);
         return new OriginationWorkflow(workflowId, applicationId, tenantId,
-                OriginationWorkflowState.RISK_RUNNING, attemptId, assessmentId, null, version,
+                OriginationWorkflowState.RISK_RUNNING, attemptId, assessmentId, null, null, version,
                 current == null ? now : current.createdAt(), now);
     }
 
@@ -136,9 +265,9 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
     }
 
     private void validateRiskStart(LoanApplication application, OriginationWorkflow current) {
-        var status = application.status();
-        boolean allowed = status == io.github.finbridge.lending.domain.ApplicationStatus.SUBMITTED
-                || status == io.github.finbridge.lending.domain.ApplicationStatus.RISK_EVALUATING;
+        var applicationStatus = application.status();
+        boolean allowed = applicationStatus == io.github.finbridge.lending.domain.ApplicationStatus.SUBMITTED
+                || applicationStatus == io.github.finbridge.lending.domain.ApplicationStatus.RISK_EVALUATING;
         if (!allowed || (current != null
                 && current.state() != OriginationWorkflowState.RISK_RUNNING)) {
             throw new LendingCoreException("Application cannot start or resume risk evaluation");
@@ -159,53 +288,48 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
     }
 
     private void persistWorkflowClaim(OriginationWorkflow current, UUID workflowId,
-                                     UUID applicationId, UUID tenantId, UUID attemptId,
-                                     UUID assessmentId,
-                                     long version, java.time.Instant now) {
+            UUID applicationId, UUID tenantId, UUID attemptId, UUID assessmentId,
+            long version, java.time.Instant now) {
         if (current == null) {
             jdbc.update("INSERT INTO origination_workflows (workflow_id, application_id, tenant_id, "
                             + "state, active_risk_attempt_id, active_assessment_id, version, created_at, updated_at) "
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", workflowId, applicationId,
                     tenantId, OriginationWorkflowState.RISK_RUNNING.name(), attemptId, assessmentId, version,
                     Timestamp.from(now), Timestamp.from(now));
-        } else {
-            int updated = jdbc.update("UPDATE origination_workflows SET state = ?, active_risk_attempt_id = ?, "
-                            + "active_assessment_id = ?, completed_assessment_id = NULL, "
-                            + "version = ?, updated_at = ? "
-                            + "WHERE workflow_id = ? AND version = ?",
-                    OriginationWorkflowState.RISK_RUNNING.name(), attemptId, assessmentId, version,
-                    Timestamp.from(now), workflowId, current.version());
-            if (updated != 1) {
-                throw new LendingCoreException("Risk workflow claim lost optimistic race");
-            }
+            return;
         }
+        int updated = jdbc.update("UPDATE origination_workflows SET state = ?, active_risk_attempt_id = ?, "
+                        + "active_assessment_id = ?, completed_assessment_id = NULL, version = ?, updated_at = ? "
+                        + "WHERE workflow_id = ? AND version = ?",
+                OriginationWorkflowState.RISK_RUNNING.name(), attemptId, assessmentId, version,
+                Timestamp.from(now), workflowId, current.version());
+        requireOne(updated, "Risk workflow claim lost optimistic race");
     }
 
     private void persistRiskStep(UUID workflowId, UUID attemptId, UUID assessmentId,
-                                 java.time.Instant now) {
-        Integer priorAttempts = jdbc.queryForObject("SELECT COUNT(*) FROM origination_workflow_steps "
+            java.time.Instant now) {
+        Integer prior = jdbc.queryForObject("SELECT COUNT(*) FROM origination_workflow_steps "
                 + "WHERE workflow_id = ? AND step_name = 'RISK'", Integer.class, workflowId);
-        int attemptNumber = Objects.requireNonNull(priorAttempts, "Workflow risk attempt count") + 1;
+        int attemptNumber = Objects.requireNonNull(prior, "Workflow risk attempt count") + 1;
         jdbc.update("INSERT INTO origination_workflow_steps (attempt_id, workflow_id, step_name, "
                         + "state, attempt_number, started_at, assessment_id) "
-                        + "VALUES (?, ?, 'RISK', 'RUNNING', ?, ?, ?)", attemptId, workflowId,
-                attemptNumber, Timestamp.from(now), assessmentId);
+                        + "VALUES (?, ?, 'RISK', 'RUNNING', ?, ?, ?)",
+                attemptId, workflowId, attemptNumber, Timestamp.from(now), assessmentId);
     }
 
     private void transitionApplicationToEvaluating(LoanApplication application, UUID tenantId,
-                                                    UUID applicationId, java.time.Instant now) {
-        if (application.status() == io.github.finbridge.lending.domain.ApplicationStatus.SUBMITTED) {
-            int updated = jdbc.update("UPDATE loan_applications SET status = ?, updated_at = ?, "
-                            + "version = version + 1 WHERE application_id = ? AND tenant_id = ? AND version = ?",
-                    io.github.finbridge.lending.domain.ApplicationStatus.RISK_EVALUATING.name(),
-                    Timestamp.from(now), applicationId, tenantId, application.version());
-            if (updated != 1) {
-                throw new LendingCoreException("Application changed while risk evaluation was starting");
-            }
+            UUID applicationId, java.time.Instant now) {
+        if (application.status() != io.github.finbridge.lending.domain.ApplicationStatus.SUBMITTED) {
+            return;
         }
+        int updated = jdbc.update("UPDATE loan_applications SET status = ?, updated_at = ?, "
+                        + "version = version + 1 WHERE application_id = ? AND tenant_id = ? AND version = ?",
+                io.github.finbridge.lending.domain.ApplicationStatus.RISK_EVALUATING.name(),
+                Timestamp.from(now), applicationId, tenantId, application.version());
+        requireOne(updated, "Application changed while risk evaluation was starting");
     }
 
-    private LoanApplication mapApplicationForWorkflow(ResultSet row, int ignoredRowNumber) throws SQLException {
+    private LoanApplication mapApplication(ResultSet row, int ignoredRowNumber) throws SQLException {
         return new LoanApplication(row.getObject("application_id", UUID.class),
                 row.getObject("tenant_id", UUID.class), row.getString("applicant_id"),
                 row.getString("product_code"), row.getInt("product_version"),
@@ -222,22 +346,6 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                 this::mapWorkflow, tenantId, applicationId).stream().findFirst();
     }
 
-    private OriginationWorkflow findWorkflowForUpdate(UUID tenantId, UUID applicationId) {
-        return jdbc.query("SELECT * FROM origination_workflows WHERE tenant_id = ? AND application_id = ? "
-                        + "FOR UPDATE", this::mapWorkflow, tenantId, applicationId)
-                .stream().findFirst().orElse(null);
-    }
-
-    private OriginationWorkflow mapWorkflow(ResultSet row, int ignoredRowNumber) throws SQLException {
-        return new OriginationWorkflow(row.getObject("workflow_id", UUID.class),
-                row.getObject("application_id", UUID.class), row.getObject("tenant_id", UUID.class),
-                OriginationWorkflowState.valueOf(row.getString("state")),
-                row.getObject("active_risk_attempt_id", UUID.class),
-                row.getObject("active_assessment_id", UUID.class),
-                row.getObject("completed_assessment_id", UUID.class), row.getLong("version"),
-                row.getTimestamp("created_at").toInstant(), row.getTimestamp("updated_at").toInstant());
-    }
-
     private void insertLoan(Loan loan) {
         jdbc.update("INSERT INTO loans (loan_id, application_id, tenant_id, principal, currency, "
                         + "annual_interest_rate_percent, term_months, product_code, product_version, "
@@ -246,8 +354,8 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                 loan.loanId(), loan.applicationId(), loan.tenantId(), loan.principal(),
                 loan.currency().getCurrencyCode(), loan.annualInterestRatePercent(), loan.termMonths(),
                 loan.productCode(), loan.productVersion(), loan.status().name(),
-                loan.disbursementTransactionId(), timestamp(loan.disbursedAt()),
-                timestamp(loan.activatedAt()), Timestamp.from(loan.createdAt()), loan.version());
+                loan.disbursementTransactionId(), timestamp(loan.disbursedAt()), timestamp(loan.activatedAt()),
+                Timestamp.from(loan.createdAt()), loan.version());
     }
 
     private void insertPlan(RepaymentPlan plan) {
@@ -267,8 +375,8 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     installment.installmentId(), installment.planId(), installment.installmentNumber(),
                     installment.dueDate(), installment.openingPrincipal(), installment.principalAmount(),
-                    installment.interestAmount(), installment.totalAmount(),
-                    installment.remainingPrincipal(), installment.status().name());
+                    installment.interestAmount(), installment.totalAmount(), installment.remainingPrincipal(),
+                    installment.status().name());
         }
     }
 
@@ -311,5 +419,11 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                 row.getTimestamp("created_at").toInstant(),
                 row.getTimestamp("activated_at") == null ? null : row.getTimestamp("activated_at").toInstant(),
                 installments);
+    }
+
+    static void requireOne(int count, String message) {
+        if (count != 1) {
+            throw new LendingCoreException(message);
+        }
     }
 }

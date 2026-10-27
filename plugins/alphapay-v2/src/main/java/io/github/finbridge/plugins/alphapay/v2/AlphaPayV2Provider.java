@@ -26,7 +26,7 @@ public final class AlphaPayV2Provider implements PaymentProvider {
 
     @Override
     public PaymentResult disburse(DisbursementRequest request, OperationContext context) {
-        return PaymentResult.succeeded(Helper.providerMarker() + "-" + request.paymentTransactionId());
+        return resultFor(request.paymentTransactionId(), request.idempotencyKey());
     }
 
     @Override
@@ -35,8 +35,32 @@ public final class AlphaPayV2Provider implements PaymentProvider {
     }
 
     @Override
-    public PaymentStatus queryStatus(PaymentTransactionRef transaction, OperationContext context) {
-        return transaction.providerTransactionId().startsWith(Helper.providerMarker())
-                ? PaymentStatus.SUCCEEDED : PaymentStatus.UNKNOWN;
+    public PaymentResult queryStatus(PaymentTransactionRef transaction, OperationContext context) {
+        if (transaction.hasProviderTransactionId()) {
+            return transaction.providerTransactionId().startsWith(Helper.providerMarker())
+                    ? PaymentResult.succeeded(transaction.providerTransactionId())
+                    : new PaymentResult(PaymentStatus.UNKNOWN, null, null, null);
+        }
+        return resultFor(transaction.paymentTransactionId(), transaction.idempotencyKey());
+    }
+
+    private static PaymentResult resultFor(java.util.UUID transactionId, String idempotencyKey) {
+        PaymentStatus status = syntheticStatus(idempotencyKey);
+        return status == PaymentStatus.SUCCEEDED
+                ? PaymentResult.succeeded(Helper.providerMarker() + "-" + transactionId)
+                : new PaymentResult(status, null, null, null);
+    }
+
+    private static PaymentStatus syntheticStatus(String idempotencyKey) {
+        if (idempotencyKey.startsWith("demo-processing")) {
+            return PaymentStatus.PROCESSING;
+        }
+        if (idempotencyKey.startsWith("demo-failed")) {
+            return PaymentStatus.FAILED;
+        }
+        if (idempotencyKey.startsWith("demo-unknown")) {
+            return PaymentStatus.UNKNOWN;
+        }
+        return PaymentStatus.SUCCEEDED;
     }
 }

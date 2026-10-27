@@ -69,6 +69,7 @@ CREATE TABLE origination_workflows (
     active_risk_attempt_id UUID,
     active_assessment_id UUID,
     completed_assessment_id UUID REFERENCES risk_assessments (assessment_id),
+    payment_transaction_id UUID,
     version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
@@ -83,6 +84,7 @@ CREATE TABLE origination_workflow_steps (
     started_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
     assessment_id UUID REFERENCES risk_assessments (assessment_id),
+    payment_transaction_id UUID,
     failure_code VARCHAR(80)
 );
 
@@ -114,6 +116,39 @@ CREATE TABLE loans (
 );
 
 CREATE INDEX ix_loans_tenant_status ON loans (tenant_id, status, created_at DESC);
+
+CREATE TABLE payment_transactions (
+    payment_transaction_id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL REFERENCES tenants (tenant_id),
+    loan_id UUID NOT NULL REFERENCES loans (loan_id),
+    operation_type VARCHAR(32) NOT NULL,
+    idempotency_key VARCHAR(160) NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    amount NUMERIC(19, 2) NOT NULL CHECK (amount > 0),
+    currency CHAR(3) NOT NULL,
+    plugin_id VARCHAR(120) NOT NULL,
+    plugin_version VARCHAR(80) NOT NULL,
+    provider_transaction_id VARCHAR(200),
+    reconciliation_key VARCHAR(200) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    dispatch_attempt_id UUID NOT NULL,
+    dispatch_claimed_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    diagnostic_code VARCHAR(100),
+    version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0),
+    UNIQUE (tenant_id, operation_type, idempotency_key),
+    UNIQUE (loan_id, operation_type)
+);
+
+CREATE INDEX ix_payment_transactions_owner_status
+    ON payment_transactions (plugin_id, plugin_version, status);
+
+ALTER TABLE origination_workflows ADD CONSTRAINT fk_workflow_payment_transaction
+    FOREIGN KEY (payment_transaction_id) REFERENCES payment_transactions (payment_transaction_id);
+ALTER TABLE origination_workflow_steps ADD CONSTRAINT fk_step_payment_transaction
+    FOREIGN KEY (payment_transaction_id) REFERENCES payment_transactions (payment_transaction_id);
+ALTER TABLE loans ADD CONSTRAINT fk_loan_disbursement_transaction
+    FOREIGN KEY (disbursement_transaction_id) REFERENCES payment_transactions (payment_transaction_id);
 
 CREATE TABLE repayment_plans (
     plan_id UUID PRIMARY KEY,

@@ -2,6 +2,9 @@ package io.github.finbridge.lending.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -10,6 +13,9 @@ import java.util.Currency;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.lending.persistence.OriginationWorkflow;
+import io.github.finbridge.lending.persistence.OriginationWorkflowState;
 import org.junit.jupiter.api.Test;
 
 class DomainStateTest {
@@ -70,6 +76,75 @@ class DomainStateTest {
         assertThrows(IllegalStateException.class, () -> active.markDisbursementFailed());
         assertEquals(LoanStatus.DISBURSEMENT_FAILED, loan.markDisbursementFailed().status());
         assertThrows(NullPointerException.class, () -> loan.activateAfterConfirmedDisbursement(null));
+        assertThrows(IllegalStateException.class, () -> loan.recordDisbursementFailure());
+    }
+
+    @Test
+    void loanPaymentIntentAndConfirmationAreOwnedAndIdempotent() {
+        Loan loan = loan();
+        UUID transactionId = UUID.randomUUID();
+        Instant confirmedAt = Instant.parse("2026-03-01T10:00:00Z");
+        Loan processing = loan.recordPaymentIntent(transactionId);
+
+        assertEquals(LoanStatus.DISBURSEMENT_PROCESSING, processing.status());
+        assertEquals(transactionId, processing.disbursementTransactionId());
+        assertEquals(LoanStatus.DISBURSEMENT_FAILED, processing.recordDisbursementFailure().status());
+        Loan active = processing.confirmDisbursement(transactionId, confirmedAt);
+        assertEquals(LoanStatus.ACTIVE, active.status());
+        assertSame(active, active.confirmDisbursement(transactionId, confirmedAt.plusSeconds(5)));
+        assertThrows(IllegalStateException.class,
+                () -> processing.recordPaymentIntent(UUID.randomUUID()));
+        assertThrows(IllegalStateException.class,
+                () -> processing.confirmDisbursement(UUID.randomUUID(), confirmedAt));
+        assertThrows(NullPointerException.class,
+                () -> loan.recordPaymentIntent(null));
+        assertThrows(NullPointerException.class,
+                () -> processing.confirmDisbursement(transactionId, null));
+    }
+
+    @Test
+    void paymentTransactionRejectsInvalidFinancialAndProviderState() {
+        UUID paymentId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        UUID loanId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-03-01T10:00:00Z");
+        PluginKey owner = new PluginKey("alphapay", "1.0.0");
+
+        assertThrows(IllegalArgumentException.class, () -> new PaymentTransaction(paymentId,
+                tenantId, loanId, "DISBURSE", "key", "f".repeat(64), BigDecimal.ZERO,
+                Currency.getInstance("CNY"), owner, null, "reconciliation-key",
+                PaymentTransactionStatus.UNKNOWN, attemptId, now, now, 0, null));
+        assertThrows(IllegalArgumentException.class, () -> new PaymentTransaction(paymentId,
+                tenantId, loanId, "DISBURSE", "key", "invalid", BigDecimal.ONE,
+                Currency.getInstance("CNY"), owner, null, "reconciliation-key",
+                PaymentTransactionStatus.UNKNOWN, attemptId, now, now, 0, null));
+        assertThrows(IllegalArgumentException.class, () -> new PaymentTransaction(paymentId,
+                tenantId, loanId, "DISBURSE", "key", "f".repeat(64), BigDecimal.ONE,
+                Currency.getInstance("CNY"), owner, null, "reconciliation-key",
+                PaymentTransactionStatus.SUCCEEDED, attemptId, now, now, 0, null));
+    }
+
+    @Test
+    void workflowRequiresPaymentOwnerForReconciliationState() {
+        UUID workflowId = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-01-01T00:00:00Z");
+        Instant updatedAt = createdAt.plusSeconds(1);
+
+        OriginationWorkflow riskPending = new OriginationWorkflow(workflowId, applicationId, tenantId,
+                OriginationWorkflowState.RISK_PENDING,
+                null, null, null, null, 0, createdAt, updatedAt);
+        assertEquals(createdAt, riskPending.createdAt());
+        assertEquals(updatedAt, riskPending.updatedAt());
+        assertThrows(IllegalArgumentException.class, () -> new OriginationWorkflow(workflowId,
+                applicationId, tenantId,
+                OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED,
+                null, null, UUID.randomUUID(), null, 1, createdAt, updatedAt));
+        assertThrows(NullPointerException.class, () -> new OriginationWorkflow(workflowId,
+                applicationId, tenantId, OriginationWorkflowState.RISK_PENDING,
+                null, null, null, null, 0, createdAt, null));
     }
 
     @Test
@@ -122,6 +197,15 @@ class DomainStateTest {
         assertThrows(IllegalArgumentException.class, () -> new RiskAssessment(assessmentId,
                 applicationId, tenantId, AssessmentStatus.PENDING, 1001, null, null, null,
                 List.of(), List.of(), "policy-1", created, null));
+    }
+
+    @Test
+    void paymentStatusReportsOnlyNonterminalStatesAsUnresolved() {
+        assertTrue(PaymentTransactionStatus.SUBMISSION_IN_PROGRESS.unresolved());
+        assertTrue(PaymentTransactionStatus.PROCESSING.unresolved());
+        assertTrue(PaymentTransactionStatus.UNKNOWN.unresolved());
+        assertFalse(PaymentTransactionStatus.SUCCEEDED.unresolved());
+        assertFalse(PaymentTransactionStatus.FAILED.unresolved());
     }
 
     private static LoanApplication application() {

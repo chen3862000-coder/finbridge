@@ -10,9 +10,9 @@ The v2 ADRs are **proposed**, not accepted. They capture the choices recommended
 | [ADR-004](ADR-004-typed-spi-contracts.md) | Typed, explicitly versioned SPI contracts |
 | [ADR-005](ADR-005-tenant-capability-routing.md) | Tenant-aware capability routing |
 | [ADR-006](ADR-006-hot-swap-consistency.md) | Invocation pinning and draining for hot swap |
-| [ADR-007](ADR-007-payment-transaction-ownership.md) | Immutable payment provider ownership |
-| [ADR-008](ADR-008-durable-workflow-orchestration.md) | Durable origination state machine |
-| [ADR-009](ADR-009-loan-activation-after-disbursement.md) | Activate only after confirmed disbursement |
+| [ADR-007](ADR-007-payment-transaction-ownership.md) | Accepted M4 immutable payment ownership and query-only ambiguity recovery |
+| [ADR-008](ADR-008-durable-workflow-orchestration.md) | Accepted durable origination state machine |
+| [ADR-009](ADR-009-loan-activation-after-disbursement.md) | Accepted M4 activation only after persisted confirmed disbursement |
 | [ADR-010](ADR-010-repayment-plan-generation.md) | Deterministic amortization and schedule dates |
 | [ADR-011](ADR-011-postgresql-persistence.md) | PostgreSQL for durable platform state |
 | [ADR-012](ADR-012-synthetic-risk-policy.md) | User-approved deterministic synthetic risk policy |

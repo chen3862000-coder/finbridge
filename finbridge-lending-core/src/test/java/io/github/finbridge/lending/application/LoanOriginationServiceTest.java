@@ -40,7 +40,7 @@ class LoanOriginationServiceTest {
         applications.applications.put(appId, approved);
         when(aggregates.findLoanByApplication(tenant, appId)).thenReturn(Optional.empty());
         when(products.findVersion("CASH_LOAN_DEMO", 1)).thenReturn(Optional.of(product()));
-        when(aggregates.originate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(aggregates.originateApproved(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         Loan loan = service.originate(tenant, appId);
@@ -48,7 +48,7 @@ class LoanOriginationServiceTest {
         org.mockito.ArgumentCaptor<io.github.finbridge.lending.domain.RepaymentPlan> plan =
                 org.mockito.ArgumentCaptor.forClass(io.github.finbridge.lending.domain.RepaymentPlan.class);
         org.mockito.ArgumentCaptor<Loan> savedLoan = org.mockito.ArgumentCaptor.forClass(Loan.class);
-        org.mockito.Mockito.verify(aggregates).originate(savedLoan.capture(), plan.capture());
+        org.mockito.Mockito.verify(aggregates).originateApproved(savedLoan.capture(), plan.capture());
         assertEquals(loan.loanId(), plan.getValue().loanId());
         assertEquals(LoanStatus.PENDING_DISBURSEMENT, savedLoan.getValue().status());
         assertEquals(3, plan.getValue().installments().size());
@@ -108,7 +108,7 @@ class LoanOriginationServiceTest {
         applications.applications.put(appId, approved);
         when(aggregates.findLoanByApplication(tenant, appId)).thenReturn(Optional.empty());
         when(products.findVersion("CASH_LOAN_DEMO", 1)).thenReturn(Optional.of(product()));
-        when(aggregates.originate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(aggregates.originateApproved(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         assertEquals(LoanStatus.PENDING_DISBURSEMENT, service.originate(tenant, appId).status());
     }
@@ -121,11 +121,11 @@ class LoanOriginationServiceTest {
                 application(tenant, appId, ApplicationStatus.APPROVED));
         when(aggregates.findLoanByApplication(tenant, appId)).thenReturn(Optional.empty());
         when(products.findVersion("CASH_LOAN_DEMO", 1)).thenReturn(Optional.of(product()));
-        when(aggregates.originate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(aggregates.originateApproved(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         Loan originated = service.originate(tenant, appId);
         assertEquals(LoanStatus.PENDING_DISBURSEMENT, originated.status());
-        org.mockito.Mockito.verify(aggregates).originate(
+        org.mockito.Mockito.verify(aggregates).originateApproved(
                 org.mockito.ArgumentMatchers.eq(originated), org.mockito.ArgumentMatchers.any());
     }
 
@@ -157,6 +157,19 @@ class LoanOriginationServiceTest {
                 LoanStatus.PENDING_DISBURSEMENT, null, null, null, NOW, 0);
         when(aggregates.findLoan(tenant, loanId)).thenReturn(Optional.of(expected));
         assertEquals(expected, service.getLoan(tenant, loanId));
+    }
+
+    @Test
+    void disbursementLookupReturnsDurableClaimAndFailsWhenAbsent() {
+        UUID tenant = UUID.randomUUID();
+        UUID loanId = UUID.randomUUID();
+        LendingAggregateRepository.DisbursementClaim expected =
+                mock(LendingAggregateRepository.DisbursementClaim.class);
+        when(aggregates.findDisbursement(tenant, loanId)).thenReturn(Optional.of(expected));
+        assertEquals(expected, service.getDisbursement(tenant, loanId));
+
+        when(aggregates.findDisbursement(tenant, loanId)).thenReturn(Optional.empty());
+        assertThrows(LendingCoreException.class, () -> service.getDisbursement(tenant, loanId));
     }
 
     private static LoanApplication application(UUID tenant, UUID id, ApplicationStatus status) {

@@ -89,10 +89,10 @@ class RiskAssessmentServiceTest {
         UUID completedId = UUID.randomUUID();
         running = new OriginationWorkflow(running.workflowId(), running.applicationId(),
                 running.tenantId(), running.state(), running.activeRiskAttemptId(),
-                UUID.randomUUID(), null, running.version(), running.createdAt(), running.updatedAt());
+                UUID.randomUUID(), null, null, running.version(), running.createdAt(), running.updatedAt());
         OriginationWorkflow completed = new OriginationWorkflow(running.workflowId(),
                 application.applicationId(), tenant, OriginationWorkflowState.RISK_COMPLETED,
-                null, null, completedId, 5, NOW, NOW);
+                null, null, completedId, null, 5, NOW, NOW);
         RiskAssessment result = completedAssessment(application, completedId);
         when(applications.getApplication(tenant, application.applicationId())).thenReturn(application);
         when(workflows.findByApplication(tenant, application.applicationId())).thenReturn(Optional.of(running));
@@ -143,7 +143,7 @@ class RiskAssessmentServiceTest {
         UUID assessmentId = UUID.randomUUID();
         OriginationWorkflow completed = new OriginationWorkflow(UUID.randomUUID(), applicationId,
                 tenant, OriginationWorkflowState.RISK_COMPLETED, null, null, assessmentId,
-                2, NOW, NOW);
+                null, 2, NOW, NOW);
         RiskAssessment expected = completedAssessment(
                 application(tenant, ApplicationStatus.APPROVED, 1), assessmentId);
         LendingApplicationService applications = mock(LendingApplicationService.class);
@@ -166,7 +166,7 @@ class RiskAssessmentServiceTest {
         UUID assessmentId = UUID.randomUUID();
         OriginationWorkflow completed = new OriginationWorkflow(UUID.randomUUID(), applicationId,
                 tenant, OriginationWorkflowState.RISK_COMPLETED, null, null, assessmentId,
-                2, NOW, NOW);
+                null, 2, NOW, NOW);
         LendingApplicationService applications = mock(LendingApplicationService.class);
         OriginationWorkflowRepository workflows = mock(OriginationWorkflowRepository.class);
         RiskAssessmentRepository assessments = mock(RiskAssessmentRepository.class);
@@ -237,7 +237,7 @@ class RiskAssessmentServiceTest {
     private static OriginationWorkflow workflow(UUID tenant, UUID applicationId, long version) {
         return new OriginationWorkflow(UUID.randomUUID(), applicationId, tenant,
                 OriginationWorkflowState.RISK_RUNNING, UUID.randomUUID(), UUID.randomUUID(), null,
-                version, NOW, NOW);
+                null, version, NOW, NOW);
     }
 
     private static RiskAssessment pending(LoanApplication application, UUID assessmentId) {

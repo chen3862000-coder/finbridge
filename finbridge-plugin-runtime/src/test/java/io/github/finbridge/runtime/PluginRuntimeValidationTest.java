@@ -140,10 +140,11 @@ class PluginRuntimeValidationTest {
             }
 
             @Override
-            public io.github.finbridge.spi.payment.PaymentStatus queryStatus(
+            public io.github.finbridge.spi.payment.PaymentResult queryStatus(
                     io.github.finbridge.spi.payment.PaymentTransactionRef transaction,
                     io.github.finbridge.spi.OperationContext context) {
-                return io.github.finbridge.spi.payment.PaymentStatus.UNKNOWN;
+                return new io.github.finbridge.spi.payment.PaymentResult(
+                        io.github.finbridge.spi.payment.PaymentStatus.UNKNOWN, null, null, null);
             }
         };
         PluginHandle handle = new PluginHandle(provider.descriptor(), "checksum", provider, loader);
@@ -243,10 +244,11 @@ class PluginRuntimeValidationTest {
         }
 
         @Override
-        public io.github.finbridge.spi.payment.PaymentStatus queryStatus(
+        public io.github.finbridge.spi.payment.PaymentResult queryStatus(
                 io.github.finbridge.spi.payment.PaymentTransactionRef transaction,
                 io.github.finbridge.spi.OperationContext operationContext) {
-            return io.github.finbridge.spi.payment.PaymentStatus.UNKNOWN;
+            return new io.github.finbridge.spi.payment.PaymentResult(
+                    io.github.finbridge.spi.payment.PaymentStatus.UNKNOWN, null, null, null);
         }
     }
 
