@@ -9,5 +9,9 @@ public interface OriginationWorkflowRepository {
 
     OriginationWorkflow resumeRisk(UUID tenantId, UUID applicationId, Instant now);
 
+    java.util.List<WorkflowRecoveryCandidate> interruptedRiskWorkflows();
+
+    record WorkflowRecoveryCandidate(UUID tenantId, UUID applicationId) { }
+
     Optional<OriginationWorkflow> findByApplication(UUID tenantId, UUID applicationId);
 }

@@ -71,7 +71,8 @@ class JdbcLendingCoreIntegrationTest {
         aggregateRepository = new JdbcLendingAggregateRepository(dataSource);
         assessmentRepository = new JdbcRiskAssessmentRepository(dataSource, new ObjectMapper());
         tenantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
-        jdbc.execute("TRUNCATE TABLE payment_transactions, repayment_installments, repayment_plans, "
+        jdbc.execute("TRUNCATE TABLE plugin_lifecycle_events, tenant_plugin_bindings, "
+                + "tenant_plugin_binding_revisions, plugin_artifacts, payment_transactions, repayment_installments, repayment_plans, "
                 + "loans, origination_workflow_steps, origination_workflows, risk_assessments, "
                 + "loan_applications CASCADE");
         jdbc.update("INSERT INTO tenants (tenant_id, tenant_code) VALUES (?, ?) "
@@ -89,6 +90,22 @@ class JdbcLendingCoreIntegrationTest {
                 new BigDecimal("50000.00"), new Integer[]{3, 6, 12},
                 new BigDecimal("12.000000"), true);
         application = application(tenantId, UUID.randomUUID(), 0, ApplicationStatus.SUBMITTED);
+    }
+
+    @Test
+    void startupRecoveryCandidatesAreTenantScopedAndOnlyIncludeRiskRunningWorkflows() {
+        UUID appId = UUID.randomUUID();
+        applicationRepository.insert(application(tenantId, appId, 0, ApplicationStatus.SUBMITTED),
+                "recovery-candidate-key", "a".repeat(64));
+        Instant now = Instant.parse("2026-03-10T10:00:00Z");
+        aggregateRepository.startRisk(tenantId, appId, now);
+
+        List<OriginationWorkflowRepository.WorkflowRecoveryCandidate> candidates =
+                aggregateRepository.interruptedRiskWorkflows();
+
+        assertEquals(1, candidates.size());
+        assertEquals(tenantId, candidates.getFirst().tenantId());
+        assertEquals(appId, candidates.getFirst().applicationId());
     }
 
     @Test
@@ -233,7 +250,7 @@ class JdbcLendingCoreIntegrationTest {
         assertEquals(AssessmentDecision.APPROVE, saved.decision());
         assertEquals(ApplicationStatus.APPROVED,
                 applicationRepository.find(tenantId, application.applicationId()).orElseThrow().status());
-        assertEquals(OriginationWorkflowState.RISK_COMPLETED,
+        assertEquals(OriginationWorkflowState.PAYMENT_PENDING,
                 workflowRepository.findByApplication(tenantId, application.applicationId()).orElseThrow().state());
         assertEquals("COMPLETED", jdbc.queryForObject(
                 "SELECT state FROM origination_workflow_steps WHERE attempt_id = ?",
@@ -259,7 +276,7 @@ class JdbcLendingCoreIntegrationTest {
         OriginationWorkflow replay = aggregateRepository.startRisk(
                 tenantId, application.applicationId(), now.plusSeconds(2));
 
-        assertEquals(OriginationWorkflowState.RISK_COMPLETED, replay.state());
+        assertEquals(OriginationWorkflowState.PAYMENT_PENDING, replay.state());
         assertEquals(completed.assessmentId(), replay.completedAssessmentId());
     }
 
@@ -682,6 +699,30 @@ class JdbcLendingCoreIntegrationTest {
         assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(owner));
         assertFalse(aggregateRepository.hasUnresolvedPaymentOwner(
                 new PluginKey("alphapay", "2.0.0")));
+    }
+
+    @Test
+    void startupPaymentRecoveryCandidatesAndMissingOwnerStayUnresolved() {
+        Loan loan = prepareApprovedLoan("payment-startup-owner-missing");
+        Instant now = Instant.parse("2026-03-10T12:00:00Z");
+        PluginKey owner = new PluginKey("retired-pay", "1.0.0");
+        var claim = aggregateRepository.claimDisbursement(tenantId, loan.loanId(), owner,
+                UUID.randomUUID(), "startup-owner-missing-key", "f".repeat(64),
+                UUID.randomUUID(), now);
+        aggregateRepository.recordDisbursementOutcome(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                PaymentStatus.UNKNOWN, null, "PAYMENT_PROVIDER_TIMEOUT", null, null, now.plusSeconds(1));
+
+        assertEquals(1, aggregateRepository.findUnresolvedPaymentTransactions().size());
+        assertEquals(1, aggregateRepository.findUnresolvedDisbursements().size());
+        aggregateRepository.markPaymentOwnerUnavailable(tenantId,
+                claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(),
+                now.plusSeconds(2));
+
+        assertEquals(PaymentTransactionStatus.RECONCILIATION_REQUIRED,
+                aggregateRepository.findPaymentTransaction(tenantId,
+                        claim.transaction().paymentTransactionId()).orElseThrow().status());
+        assertTrue(aggregateRepository.hasUnresolvedPaymentOwner(owner));
     }
 
     @Test

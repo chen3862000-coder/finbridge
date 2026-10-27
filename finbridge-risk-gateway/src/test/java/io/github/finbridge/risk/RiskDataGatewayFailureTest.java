@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import io.github.finbridge.runtime.PluginHandle;
 import io.github.finbridge.runtime.PluginInvocationLease;
+import io.github.finbridge.runtime.PluginOperationMetrics;
 import io.github.finbridge.runtime.PluginRuntime;
 import io.github.finbridge.spi.Capability;
 import io.github.finbridge.spi.OperationContext;
@@ -33,13 +34,27 @@ class RiskDataGatewayFailureTest {
         PluginInvocationLease lease = lease();
         when(lease.invoke(any())).thenThrow(new IllegalStateException("synthetic provider failure"));
         PluginRuntime runtime = runtime(lease);
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PluginOperationMetrics metrics = new PluginOperationMetrics(registry);
         try (ThreadPoolExecutor executor = executor()) {
-            var result = gateway(runtime, executor).query(TENANT, RiskDataType.CREDIT_SCORE,
+            var result = gateway(runtime, executor, metrics).query(TENANT, RiskDataType.CREDIT_SCORE,
                     request(), context());
 
             assertEquals("PROVIDER_FAILURE", result.failureCode());
             assertEquals(EXECUTION, result.executionId());
+            assertEquals(1.0, registry.get("finbridge.plugin.operations")
+                    .tag("operation", "risk_query").tag("outcome", "failure").counter().count());
         }
+    }
+
+    @Test
+    void failureClassifierMapsTimeoutAndExecutorSaturationToBoundedOutcomes() {
+        assertEquals(PluginOperationMetrics.Outcome.TIMEOUT,
+                RiskDataGateway.metricOutcome("RISK_PROVIDER_TIMEOUT"));
+        assertEquals(PluginOperationMetrics.Outcome.REJECTED,
+                RiskDataGateway.metricOutcome("RISK_EXECUTOR_SATURATED"));
+        assertEquals(PluginOperationMetrics.Outcome.FAILURE,
+                RiskDataGateway.metricOutcome("PROVIDER_FAILURE"));
     }
 
     @Test
@@ -81,6 +96,11 @@ class RiskDataGatewayFailureTest {
 
     private static RiskDataGateway gateway(PluginRuntime runtime, ThreadPoolExecutor executor) {
         return new RiskDataGateway(runtime, executor, Duration.ofSeconds(1));
+    }
+
+    private static RiskDataGateway gateway(PluginRuntime runtime, ThreadPoolExecutor executor,
+            PluginOperationMetrics metrics) {
+        return new RiskDataGateway(runtime, executor, Duration.ofSeconds(1), metrics);
     }
 
     private static ThreadPoolExecutor executor() {

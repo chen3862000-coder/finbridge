@@ -16,6 +16,8 @@ import io.github.finbridge.spi.risk.RiskDataType;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -88,6 +90,133 @@ class PluginRuntimeValidationTest {
     }
 
     @Test
+    void bindingSnapshotCanBeRestoredPublishedAndRemovedByPersistedRevision() {
+        PluginBindingRegistry bindings = new PluginBindingRegistry();
+        UUID tenant = UUID.randomUUID();
+        Capability capability = Capability.DISBURSE;
+        PluginKey original = new PluginKey("restored", "1");
+        PluginKey replacement = new PluginKey("restored", "2");
+
+        assertEquals(7, bindings.restore(tenant, capability, original, 7).version());
+        assertEquals(original, bindings.binding(tenant, capability).pluginKey());
+        bindings.publish(new PluginBinding(tenant, capability, replacement, 8));
+        assertEquals(replacement, bindings.binding(tenant, capability).pluginKey());
+        assertEquals(9, bindings.publishUnbind(tenant, capability, 9));
+        assertThrows(IllegalArgumentException.class, () -> bindings.binding(tenant, capability));
+        assertThrows(IllegalStateException.class,
+                () -> bindings.publishUnbind(tenant, capability, 10));
+    }
+
+    @Test
+    void runtimeBindingRestorePublishAndRemovalRequireRealActivePluginAndMonotonicVersion()
+            throws Exception {
+        String artifact = "alphapay-v1-0.1.0-SNAPSHOT-jar-with-dependencies.jar";
+        Path source = Path.of(System.getProperty("finbridge.root"), "plugins", "alphapay-v1",
+                "target", artifact);
+        Files.copy(source, pluginDirectory.resolve(artifact));
+        PluginRuntime runtime = runtime();
+        PluginHandle handle = runtime.install(artifact, context());
+        assertThrows(IllegalStateException.class, () -> runtime.restoreBinding(UUID.randomUUID(),
+                Capability.DISBURSE, handle.key(), 1));
+        assertThrows(IllegalStateException.class, () -> runtime.restoreBinding(UUID.randomUUID(),
+                Capability.DISBURSE, handle.key(), 0));
+        assertThrows(IllegalStateException.class, () -> runtime.publishBinding(
+                new PluginBinding(UUID.randomUUID(), Capability.DISBURSE, handle.key(), 1)));
+        assertThrows(IllegalStateException.class, () -> runtime.publishBinding(
+                new PluginBinding(UUID.randomUUID(), Capability.CREDIT_SCORE, handle.key(), 1)));
+        runtime.activate(handle.key());
+        UUID tenant = UUID.randomUUID();
+        assertEquals(1, runtime.restoreBinding(tenant, Capability.DISBURSE, handle.key(), 1).version());
+        assertEquals(handle.key(), runtime.publishBinding(
+                new PluginBinding(tenant, Capability.DISBURSE, handle.key(), 2)).pluginKey());
+        assertEquals(handle.key(), runtime.binding(tenant, Capability.DISBURSE).pluginKey());
+        assertThrows(IllegalStateException.class, () -> runtime.restoreBinding(
+                tenant, Capability.DISBURSE, handle.key(), 2));
+        assertThrows(IllegalStateException.class, () -> runtime.publishBinding(
+                new PluginBinding(tenant, Capability.DISBURSE, handle.key(), 1)));
+        runtime.bind(tenant, Capability.DISBURSE, handle.key(), 2);
+        assertEquals(4, runtime.publishUnbind(tenant, Capability.DISBURSE, 4));
+        assertThrows(IllegalArgumentException.class, () -> runtime.binding(tenant, Capability.DISBURSE));
+        assertThrows(IllegalStateException.class,
+                () -> runtime.publishUnbind(tenant, Capability.DISBURSE, 5));
+        assertThrows(IllegalStateException.class,
+                () -> runtime.publishUnbind(UUID.randomUUID(), Capability.DISBURSE, 1));
+        assertTrue(runtime.drain(handle.key(), Duration.ZERO, ignored -> true));
+        runtime.unload(handle.key(), Duration.ZERO, ignored -> true);
+        assertTrue(runtime.plugins().isEmpty());
+    }
+
+    @Test
+    void runtimeDiscardsLoadedPluginAndReportsLifecycleState() throws Exception {
+        String artifact = "alphapay-v1-0.1.0-SNAPSHOT-jar-with-dependencies.jar";
+        Path source = Path.of(System.getProperty("finbridge.root"), "plugins", "alphapay-v1",
+                "target", artifact);
+        Files.copy(source, pluginDirectory.resolve(artifact));
+        PluginRuntime runtime = runtime();
+        PluginHandle handle = runtime.install(artifact, context());
+
+        runtime.discardLoaded(handle.key());
+
+        assertEquals(PluginLifecycleState.UNLOADED, handle.state());
+        assertTrue(runtime.plugins().isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> runtime.plugin(handle.key()));
+    }
+
+    @Test
+    void operationMetricsOnlyExposeBoundedOperationAndOutcomeTags() {
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PluginOperationMetrics metrics = new PluginOperationMetrics(registry);
+
+        metrics.record(PluginOperationMetrics.Operation.PAYMENT_RECONCILE,
+                PluginOperationMetrics.Outcome.UNKNOWN, Duration.ofMillis(12));
+
+        var counter = registry.find("finbridge.plugin.operations").counter();
+        var timer = registry.find("finbridge.plugin.operation.duration").timer();
+        assertTrue(counter != null);
+        assertTrue(timer != null);
+        assertEquals(1.0, counter.count());
+        assertEquals(12_000_000L, timer.totalTime(java.util.concurrent.TimeUnit.NANOSECONDS));
+        assertEquals(2, counter.getId().getTags().size());
+        assertEquals("payment_reconcile", counter.getId().getTag("operation"));
+        assertEquals("unknown", counter.getId().getTag("outcome"));
+    }
+
+    @Test
+    void resumeFromDrainRestoresOnlyAnIdleDrainingHandle() throws Exception {
+        PluginHandle handle = testHandle();
+        handle.activate();
+        handle.beginDrain();
+        handle.resumeFromDrain();
+        assertEquals(PluginLifecycleState.ACTIVE, handle.state());
+        handle.beginDrain();
+        try (PluginInvocationLease ignored = handle.acquire(InvocationKind.RECONCILIATION)) {
+            assertThrows(IllegalStateException.class, handle::resumeFromDrain);
+        }
+        assertTrue(handle.awaitDrained(Duration.ZERO));
+        assertThrows(IllegalArgumentException.class,
+                () -> handle.awaitDrained(Duration.ofNanos(-1)));
+        handle.unload();
+    }
+
+    @Test
+    void runtimeCanResumeAnIdleDrainingPluginHandle() throws Exception {
+        String artifact = "alphapay-v1-0.1.0-SNAPSHOT-jar-with-dependencies.jar";
+        Path source = Path.of(System.getProperty("finbridge.root"), "plugins", "alphapay-v1",
+                "target", artifact);
+        Files.copy(source, pluginDirectory.resolve(artifact));
+        PluginRuntime runtime = runtime();
+        PluginHandle handle = runtime.install(artifact, context());
+        runtime.activate(handle.key());
+        handle.beginDrain();
+
+        runtime.resumeFromDrain(handle.key());
+
+        assertEquals(PluginLifecycleState.ACTIVE, handle.state());
+        runtime.drain(handle.key(), Duration.ZERO, ignored -> true);
+        runtime.unload(handle.key(), Duration.ZERO, ignored -> true);
+    }
+
+    @Test
     void registrySortsByStablePluginIdentityAndRejectsUnknownKeys() throws Exception {
         PluginRegistry registry = new PluginRegistry();
         PluginKey missing = new PluginKey("missing", "1");
@@ -156,11 +285,26 @@ class PluginRuntimeValidationTest {
         lease.close();
         handle.beginDrain();
         assertEquals(0, handle.activeInvocations());
-        assertThrows(IllegalStateException.class, () -> handle.activate());
+        handle.resumeFromDrain();
+        assertEquals(PluginLifecycleState.ACTIVE, handle.state());
+        handle.beginDrain();
         assertEquals(new PluginKey("test", "1"), handle.key());
         assertThrows(IllegalArgumentException.class,
                 () -> handle.awaitDrained(Duration.ofMillis(-1)));
+        handle.resumeFromDrain();
+        handle.beginDrain();
         handle.unload();
+    }
+
+    @Test
+    void loadedPluginCanBeDiscardedWithoutActivation() throws Exception {
+        PluginHandle handle = testHandle();
+        String identity = handle.key().toString();
+        handle.discardLoaded();
+        assertEquals(PluginLifecycleState.UNLOADED, handle.state());
+        assertEquals("PLUGIN_LOAD_DISCARDED", handle.lifecycleEvents().getLast().diagnosticCode());
+        assertTrue(identity.startsWith("PluginKey"));
+        assertThrows(IllegalStateException.class, handle::discardLoaded);
     }
 
     @Test
@@ -201,7 +345,7 @@ class PluginRuntimeValidationTest {
     }
 
     private PluginRuntime runtime() {
-        return new PluginRuntime(pluginDirectory, getClass().getClassLoader(), 1);
+        return new PluginRuntime(pluginDirectory, new ProviderFreeParent(getClass().getClassLoader()), 1);
     }
 
     private static io.github.finbridge.spi.PluginContext context() {
@@ -269,6 +413,40 @@ class PluginRuntimeValidationTest {
                 io.github.finbridge.spi.risk.RiskDataRequest request,
                 io.github.finbridge.spi.OperationContext context) {
             return new RiskDataResult(type, RiskDataResult.Status.UNAVAILABLE, null, "TEST");
+        }
+    }
+
+    private static final class ProviderFreeParent extends ClassLoader {
+        private static final String PROVIDER_PACKAGE = "io.github.finbridge.plugins.";
+        private static final String PAYMENT_SERVICE =
+                "META-INF/services/io.github.finbridge.spi.payment.PaymentProvider";
+        private static final String RISK_SERVICE =
+                "META-INF/services/io.github.finbridge.spi.risk.RiskDataProvider";
+
+        private ProviderFreeParent(ClassLoader parent) {
+            super(parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (name.startsWith(PROVIDER_PACKAGE)) {
+                throw new ClassNotFoundException("Provider implementations must come from external JARs");
+            }
+            return super.loadClass(name, resolve);
+        }
+
+        @Override
+        public URL getResource(String name) {
+            return isProviderService(name) ? null : super.getResource(name);
+        }
+
+        @Override
+        public Enumeration<URL> getResources(String name) throws IOException {
+            return isProviderService(name) ? Collections.emptyEnumeration() : super.getResources(name);
+        }
+
+        private static boolean isProviderService(String name) {
+            return PAYMENT_SERVICE.equals(name) || RISK_SERVICE.equals(name);
         }
     }
 }

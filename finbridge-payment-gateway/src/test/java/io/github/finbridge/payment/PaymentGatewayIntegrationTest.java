@@ -31,6 +31,7 @@ import java.util.Enumeration;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -61,7 +62,9 @@ class PaymentGatewayIntegrationTest {
         UUID transactionId = UUID.randomUUID();
         String idempotencyKey = "demo-processing-42";
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        PaymentGateway gateway = new PaymentGateway(executor, Duration.ofSeconds(1));
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        PaymentGateway gateway = new PaymentGateway(executor, Duration.ofSeconds(1),
+                new io.github.finbridge.runtime.PluginOperationMetrics(registry));
         try {
             var result = gateway.disburse(runtime, provider.key(), new DisbursementRequest(transactionId,
                     tenant, UUID.randomUUID(), new java.math.BigDecimal("125.00"),
@@ -75,6 +78,10 @@ class PaymentGatewayIntegrationTest {
                     transactionId, "demo-unknown-42", null, context()).status());
             assertEquals(PaymentStatus.SUCCEEDED, gateway.reconcile(runtime, provider.key(),
                     transactionId, "demo-success-42", null, context()).status());
+            assertEquals(1.0, registry.get("finbridge.plugin.operations")
+                    .tag("operation", "payment_disburse").tag("outcome", "processing").counter().count());
+            assertEquals(1.0, registry.get("finbridge.plugin.operations")
+                    .tag("operation", "payment_reconcile").tag("outcome", "success").counter().count());
         } finally {
             runtime.unbind(tenant, Capability.DISBURSE, 1);
             executor.shutdownNow();
@@ -148,9 +155,13 @@ class PaymentGatewayIntegrationTest {
         ThreadPoolExecutor stopped = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(1));
         stopped.shutdown();
-        var saturated = new PaymentGateway(stopped, Duration.ofSeconds(1))
+        var metrics = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var saturated = new PaymentGateway(stopped, Duration.ofSeconds(1),
+                new io.github.finbridge.runtime.PluginOperationMetrics(metrics))
                 .disburse(runtime, owner, request(tenant), context());
         assertEquals("PAYMENT_EXECUTOR_SATURATED", saturated.diagnosticCode());
+        assertEquals(1.0, metrics.get("finbridge.plugin.operations")
+                .tag("operation", "payment_disburse").tag("outcome", "rejected").counter().count());
         verify(rejectedLease).close();
 
         PluginInvocationLease queuedLease = mock(PluginInvocationLease.class);
@@ -158,6 +169,7 @@ class PaymentGatewayIntegrationTest {
         when(runtime.plugin(owner)).thenReturn(queuedHandle);
         when(queuedHandle.acquire(io.github.finbridge.runtime.InvocationKind.BUSINESS))
                 .thenReturn(queuedLease);
+        var timeoutMetrics = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         ThreadPoolExecutor busy = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(1));
         CountDownLatch release = new CountDownLatch(1);
@@ -168,9 +180,12 @@ class PaymentGatewayIntegrationTest {
         });
         assertTrue(started.await(2, TimeUnit.SECONDS));
         try {
-            var timeout = new PaymentGateway(busy, Duration.ofMillis(20))
+            var timeout = new PaymentGateway(busy, Duration.ofMillis(20),
+                    new io.github.finbridge.runtime.PluginOperationMetrics(timeoutMetrics))
                     .disburse(runtime, owner, request(tenant), context());
             assertEquals("PAYMENT_PROVIDER_TIMEOUT", timeout.diagnosticCode());
+            assertEquals(1.0, timeoutMetrics.get("finbridge.plugin.operations")
+                    .tag("operation", "payment_disburse").tag("outcome", "timeout").counter().count());
         } finally {
             release.countDown();
             busy.shutdownNow();
@@ -180,8 +195,10 @@ class PaymentGatewayIntegrationTest {
 
     @Test
     void rejectsNonpositiveTimeoutAndRestoresCallerInterrupt() throws Exception {
-        assertThrows(IllegalArgumentException.class,
-                () -> new PaymentGateway(Executors.newSingleThreadExecutor(), Duration.ZERO));
+        try (ExecutorService invalidExecutor = Executors.newSingleThreadExecutor()) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new PaymentGateway(invalidExecutor, Duration.ZERO));
+        }
         UUID tenant = UUID.randomUUID();
         PluginKey owner = new PluginKey("interrupt-pay", "1");
         PluginInvocationLease lease = mock(PluginInvocationLease.class);
@@ -189,15 +206,45 @@ class PaymentGatewayIntegrationTest {
         PluginRuntime runtime = mock(PluginRuntime.class);
         when(runtime.plugin(owner)).thenReturn(handle);
         when(handle.acquire(io.github.finbridge.runtime.InvocationKind.BUSINESS)).thenReturn(lease);
-        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(1));
+        CountDownLatch workerStarted = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        executor.execute(() -> {
+            workerStarted.countDown();
+            await(releaseWorker);
+        });
+        assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+        try {
             Thread.currentThread().interrupt();
             var interrupted = new PaymentGateway(executor, Duration.ofSeconds(1))
                     .disburse(runtime, owner, request(tenant), context());
             assertEquals("PAYMENT_CALL_INTERRUPTED", interrupted.diagnosticCode());
             assertTrue(Thread.currentThread().isInterrupted());
             Thread.interrupted();
-            verify(lease, timeout(1000)).close();
+            releaseWorker.countDown();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
+            verify(lease).close();
+        } finally {
+            releaseWorker.countDown();
+            executor.shutdownNow();
         }
+    }
+
+    @Test
+    void doesNotInvokeProviderOrCloseLeaseTwiceWhenCancelledBeforeCallableStarts() {
+        PluginKey owner = new PluginKey("cancelled-pay", "1");
+        AtomicInteger state = new AtomicInteger(2);
+        PluginInvocationLease lease = mock(PluginInvocationLease.class);
+
+        var outcome = PaymentGateway.invokeUnlessCancelled(state, lease, owner, request(UUID.randomUUID()),
+                context(), false);
+
+        assertEquals(PaymentStatus.UNKNOWN, outcome.status());
+        assertEquals("PAYMENT_CALL_INTERRUPTED", outcome.diagnosticCode());
+        verify(lease, org.mockito.Mockito.never()).invoke(any());
+        verify(lease, org.mockito.Mockito.never()).close();
     }
 
     private static DisbursementRequest request(UUID tenant) {

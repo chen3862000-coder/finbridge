@@ -1,6 +1,7 @@
 package io.github.finbridge.lending.application;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -234,6 +235,37 @@ class DisbursementServiceTest {
         when(origination.getDisbursement(tenantId, loanId)).thenReturn(expected);
 
         assertSame(expected, service.getStatus(tenantId, loanId));
+    }
+
+    @Test
+    void startupRecoveryMarksPaymentOwnerUnavailableWhenOriginalProviderCannotBeLoaded() {
+        PaymentTransaction unresolved = transaction(PaymentTransactionStatus.UNKNOWN);
+        when(aggregates.findUnresolvedPaymentTransactions()).thenReturn(java.util.List.of(unresolved));
+        when(origination.getDisbursement(tenantId, loanId))
+                .thenThrow(new LendingCoreException("Payment owner is unavailable"));
+
+        assertEquals(1, service.recoverUnresolvedPayments());
+
+        verify(aggregates).markPaymentOwnerUnavailable(tenantId, transactionId, attemptId, NOW);
+        verify(gateway, never()).reconcile(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void dispatchPersistsReconciliationRequiredWhenProviderOwnerIsUnavailable() {
+        DisbursementClaim dispatch = claim(PaymentTransactionStatus.SUBMISSION_IN_PROGRESS, true,
+                OriginationWorkflowState.PAYMENT_SUBMITTING);
+        DisbursementClaim unavailable = claim(PaymentTransactionStatus.RECONCILIATION_REQUIRED, false,
+                OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED);
+        when(aggregates.findPaymentByIdempotencyKey(tenantId, key)).thenReturn(Optional.empty());
+        when(aggregates.claimDisbursement(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(dispatch);
+        when(gateway.disburse(any(), any(), any(), any()))
+                .thenReturn(outcome(PaymentStatus.UNKNOWN, null, "PAYMENT_OWNER_UNAVAILABLE"));
+        when(origination.getDisbursement(tenantId, loanId)).thenReturn(unavailable);
+
+        assertSame(unavailable, service.dispatch(tenantId, loanId, key, correlation));
+
+        verify(aggregates).markPaymentOwnerUnavailable(tenantId, transactionId, attemptId, NOW);
     }
 
     private DisbursementClaim claim(PaymentTransactionStatus status, boolean dispatchClaimed,

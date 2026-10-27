@@ -65,6 +65,18 @@ public final class PluginRuntime {
         plugin(key).activate();
     }
 
+    public void resumeFromDrain(PluginKey key) {
+        plugin(key).resumeFromDrain();
+    }
+
+    public void discardLoaded(PluginKey key) throws IOException {
+        PluginHandle handle = plugin(key);
+        handle.discardLoaded();
+        if (!registry.remove(key, handle)) {
+            throw new IllegalStateException("Plugin registry changed while discarding loaded plugin");
+        }
+    }
+
     public PluginHandle installRiskProvider(String artifactName, PluginContext context,
                                             io.github.finbridge.spi.risk.RiskDataType expectedType) {
         Objects.requireNonNull(context, "context");
@@ -120,8 +132,36 @@ public final class PluginRuntime {
         return bindingRegistry.bind(tenantId, capability, target, pluginKey, expectedVersion);
     }
 
+    public PluginBinding restoreBinding(UUID tenantId, Capability capability, PluginKey pluginKey,
+            long persistedVersion) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(capability, "capability");
+        PluginHandle target = plugin(Objects.requireNonNull(pluginKey, "pluginKey"));
+        if (target.state() != PluginLifecycleState.ACTIVE) {
+            throw new IllegalStateException("Only active plugins can be restored as bindings");
+        }
+        if (!target.descriptor().capabilities().contains(capability)) {
+            throw new IllegalArgumentException("Plugin does not support capability " + capability);
+        }
+        return bindingRegistry.restore(tenantId, capability, pluginKey, persistedVersion);
+    }
+
+    public PluginBinding publishBinding(PluginBinding binding) {
+        Objects.requireNonNull(binding, "binding");
+        PluginHandle target = plugin(binding.pluginKey());
+        if (target.state() != PluginLifecycleState.ACTIVE
+                || !target.descriptor().capabilities().contains(binding.capability())) {
+            throw new IllegalStateException("Persisted binding target is not active and capable");
+        }
+        return bindingRegistry.publish(binding);
+    }
+
     public long unbind(UUID tenantId, Capability capability, long expectedVersion) {
         return bindingRegistry.unbind(tenantId, capability, expectedVersion);
+    }
+
+    public long publishUnbind(UUID tenantId, Capability capability, long nextVersion) {
+        return bindingRegistry.publishUnbind(tenantId, capability, nextVersion);
     }
 
     public PluginInvocationLease route(UUID tenantId, Capability capability,

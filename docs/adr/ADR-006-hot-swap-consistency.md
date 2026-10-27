@@ -1,7 +1,7 @@
 # ADR-006: Hot Swap With Invocation Pinning and Draining
 
-- **Status:** Proposed, awaiting M0 approval
-- **Date:** 2026-10-26
+- **Status:** Accepted for M5 implementation
+- **Date:** 2026-10-27
 
 ## Context
 
@@ -10,6 +10,8 @@ Hot activation and routing changes must not change the implementation midway thr
 ## Decision
 
 Acquire an atomic invocation lease against an eligible plugin handle before provider code runs. Routing snapshots select handles for new calls; a binding update does not mutate held leases. Drain closes normal acquisition, allows only ownership-based reconciliation where needed, waits a bounded duration, and unload is refused while leases, bindings, or unresolved owned transactions remain.
+
+M5 persists approved artifact metadata and desired lifecycle state, immutable artifact checksum identity, tenant capability bindings, and append-only lifecycle audit events in PostgreSQL. Artifacts remain local, prebuilt, allowlisted files; arbitrary upload and signing are not implemented. Startup reloads only persisted active artifacts after checksum verification, then restores bindings. Upgrade/rollback changes future bindings only; old versions remain loaded and retained until no binding, lease, or unresolved payment owner references them. Drain/unload outcomes and failures are durably audited. In-memory handle state is reconstructed after restart and is never treated as durable actual state. The host lifecycle manager is single-process/single-host.
 
 ## Alternatives
 
@@ -27,6 +29,7 @@ Leases define the lifetime of a selected implementation; immutable snapshots mak
 - Lifecycle state and acquisition must be race-safe and covered by coordinated concurrency tests.
 - A drain may remain pending or time out; operators must act on references and stuck calls.
 - Thread interruption is cooperative and does not forcibly stop hostile code.
+- M5 does not sandbox in-process plugins or guarantee class-loader/metaspace reclamation.
 
 ## Risks
 

@@ -12,4 +12,13 @@ class HostRuntimeTest {
         PluginRuntime runtime = HostRuntime.create(Path.of("plugins"));
         assertEquals(0, runtime.plugins().size());
     }
+
+    @Test
+    void runtimeCanBeCreatedWithoutAdminAuthorityButCannotRunAdminOperations() {
+        PluginRuntime runtime = HostRuntime.create(Path.of("plugins"));
+        assertEquals(0, runtime.plugins().size());
+        org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.security.access.AccessDeniedException.class,
+                HostAuthorization::requireAdmin);
+    }
 }

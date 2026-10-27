@@ -154,6 +154,10 @@ final class JdbcDisbursementRepository {
             return updatePaymentOutcome(transaction, PaymentTransactionStatus.UNKNOWN, null,
                     diagnosticCode, now);
         }
+        if (transaction.status().unresolved() && status == PaymentStatus.UNKNOWN) {
+            return updatePaymentOutcome(transaction, PaymentTransactionStatus.RECONCILIATION_REQUIRED,
+                    null, diagnosticCode, now);
+        }
         return updatePaymentOutcome(transaction, paymentStatus(status), providerTransactionId,
                 diagnosticCode, now);
     }
@@ -173,7 +177,7 @@ final class JdbcDisbursementRepository {
         return switch (transaction.status()) {
             case SUCCEEDED -> finalizeSuccess(tenantId, transactionId, confirmedAt, date, now);
             case FAILED -> finalizeFailure(tenantId, transactionId, now);
-            case UNKNOWN, PROCESSING, SUBMISSION_IN_PROGRESS -> reconcile(tenantId, transactionId,
+            case UNKNOWN, PROCESSING, SUBMISSION_IN_PROGRESS, RECONCILIATION_REQUIRED -> reconcile(tenantId, transactionId,
                     diagnostic, now);
         };
     }
@@ -378,18 +382,21 @@ final class JdbcDisbursementRepository {
     private PaymentTransaction updatePaymentOutcome(PaymentTransaction transaction,
             PaymentTransactionStatus status, String providerTransactionId, String diagnostic,
             java.time.Instant now) {
+        PaymentTransactionStatus persistedStatus = status == PaymentTransactionStatus.UNKNOWN
+                && transaction.status() != PaymentTransactionStatus.SUBMISSION_IN_PROGRESS
+                ? PaymentTransactionStatus.RECONCILIATION_REQUIRED : status;
         int updated = jdbc.update("UPDATE payment_transactions SET status = ?, "
                         + "provider_transaction_id = COALESCE(?, provider_transaction_id), "
                         + "diagnostic_code = ?, updated_at = ?, version = version + 1 "
                         + "WHERE payment_transaction_id = ? AND tenant_id = ? AND version = ?",
-                status.name(), providerTransactionId, diagnostic, Timestamp.from(now),
+                persistedStatus.name(), providerTransactionId, diagnostic, Timestamp.from(now),
                 transaction.paymentTransactionId(), transaction.tenantId(), transaction.version());
         requireOne(updated, "Payment transaction changed concurrently");
         return new PaymentTransaction(transaction.paymentTransactionId(), transaction.tenantId(),
                 transaction.loanId(), transaction.operationType(), transaction.idempotencyKey(),
                 transaction.requestFingerprint(), transaction.amount(), transaction.currency(),
                 transaction.owner(), providerTransactionId == null ? transaction.providerTransactionId()
-                        : providerTransactionId, transaction.reconciliationKey(), status,
+                        : providerTransactionId, transaction.reconciliationKey(), persistedStatus,
                 transaction.dispatchAttemptId(), transaction.dispatchClaimedAt(), now,
                 transaction.version() + 1, diagnostic);
     }
@@ -472,10 +479,53 @@ final class JdbcDisbursementRepository {
         return Optional.of(new DisbursementClaim(transaction.orElseThrow(), loan, plan, workflow, false));
     }
 
+    java.util.List<DisbursementClaim> findUnresolvedDisbursements() {
+        java.util.List<PaymentTransaction> transactions = jdbc.query("SELECT * FROM payment_transactions "
+                        + "WHERE operation_type = 'DISBURSE' AND status IN "
+                        + "('SUBMISSION_IN_PROGRESS', 'PROCESSING', 'UNKNOWN', "
+                        + "'RECONCILIATION_REQUIRED') ORDER BY updated_at",
+                this::mapPayment);
+        java.util.List<DisbursementClaim> claims = new java.util.ArrayList<>();
+        for (PaymentTransaction transaction : transactions) {
+            findDisbursement(transaction.tenantId(), transaction.loanId()).ifPresent(claims::add);
+        }
+        return java.util.List.copyOf(claims);
+    }
+
+    java.util.List<PaymentTransaction> findUnresolvedPaymentTransactions() {
+        return jdbc.query("SELECT * FROM payment_transactions WHERE operation_type = 'DISBURSE' "
+                        + "AND status IN ('SUBMISSION_IN_PROGRESS', 'PROCESSING', 'UNKNOWN', "
+                        + "'RECONCILIATION_REQUIRED') ORDER BY updated_at",
+                this::mapPayment);
+    }
+
+    void markPaymentOwnerUnavailable(UUID tenantId, UUID paymentTransactionId, UUID attemptId,
+            java.time.Instant now) {
+        transactions.execute(status -> {
+            PaymentTransaction current = findPaymentForUpdate(tenantId, paymentTransactionId)
+                    .orElse(null);
+            PaymentTransaction transaction = requirePresent(Optional.ofNullable(current),
+                    "Payment transaction was not found");
+            if (!transaction.dispatchAttemptId().equals(attemptId) || !transaction.status().unresolved()) {
+                return null;
+            }
+            updatePaymentOutcome(transaction, PaymentTransactionStatus.RECONCILIATION_REQUIRED,
+                    null, "PAYMENT_OWNER_UNAVAILABLE", now);
+            OriginationWorkflow workflow = workflowsForPayment(tenantId, paymentTransactionId);
+            if (workflow.state() != OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED) {
+                lending.updateWorkflowPayment(workflow, paymentTransactionId,
+                        OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED, now);
+                markPaymentStepReconciliation(transaction.dispatchAttemptId(), "PAYMENT_OWNER_UNAVAILABLE");
+            }
+            return null;
+        });
+    }
+
     boolean hasUnresolvedPaymentOwner(PluginKey owner) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM payment_transactions "
                         + "WHERE plugin_id = ? AND plugin_version = ? "
-                        + "AND status IN ('SUBMISSION_IN_PROGRESS', 'PROCESSING', 'UNKNOWN')",
+                        + "AND status IN ('SUBMISSION_IN_PROGRESS', 'PROCESSING', 'UNKNOWN', "
+                        + "'RECONCILIATION_REQUIRED')",
                 Integer.class, owner.pluginId(), owner.pluginVersion());
         return Objects.requireNonNull(count, "Payment owner count") > 0;
     }

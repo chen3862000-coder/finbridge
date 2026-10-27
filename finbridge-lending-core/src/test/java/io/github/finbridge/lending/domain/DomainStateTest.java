@@ -13,6 +13,7 @@ import java.util.Currency;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import io.github.finbridge.spi.payment.PaymentStatus;
 import io.github.finbridge.spi.PluginKey;
 import io.github.finbridge.lending.persistence.OriginationWorkflow;
 import io.github.finbridge.lending.persistence.OriginationWorkflowState;
@@ -204,6 +205,15 @@ class DomainStateTest {
         assertTrue(PaymentTransactionStatus.SUBMISSION_IN_PROGRESS.unresolved());
         assertTrue(PaymentTransactionStatus.PROCESSING.unresolved());
         assertTrue(PaymentTransactionStatus.UNKNOWN.unresolved());
+        assertTrue(PaymentTransactionStatus.RECONCILIATION_REQUIRED.unresolved());
+        assertEquals(PaymentTransactionStatus.RECONCILIATION_REQUIRED,
+                PaymentTransactionStatus.fromProvider(PaymentStatus.UNKNOWN));
+        assertEquals(PaymentTransactionStatus.PROCESSING,
+                PaymentTransactionStatus.fromProvider(PaymentStatus.PROCESSING));
+        assertEquals(PaymentTransactionStatus.SUCCEEDED,
+                PaymentTransactionStatus.fromProvider(PaymentStatus.SUCCEEDED));
+        assertEquals(PaymentTransactionStatus.FAILED,
+                PaymentTransactionStatus.fromProvider(PaymentStatus.FAILED));
         assertFalse(PaymentTransactionStatus.SUCCEEDED.unresolved());
         assertFalse(PaymentTransactionStatus.FAILED.unresolved());
     }

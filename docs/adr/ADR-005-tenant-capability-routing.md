@@ -1,7 +1,7 @@
 # ADR-005: Tenant Capability Routing
 
-- **Status:** Proposed, awaiting M0 approval
-- **Date:** 2026-10-26
+- **Status:** Accepted for M5 implementation
+- **Date:** 2026-10-27
 
 ## Context
 
@@ -10,6 +10,8 @@ Tenants may select different provider versions for payment operations and risk-d
 ## Decision
 
 Resolve a provider using authenticated tenant identity, gateway type, required capability, and immutable plugin ID/version. Persist one binding per tenant/gateway/capability with optimistic revision. Publish immutable in-memory snapshots after database commit in the single-host MVP.
+
+For M5, the host facade derives the tenant from a Spring Security `Authentication` whose principal is a FinBridge-owned principal type; request-level tenant values are not accepted by facade methods. Tenant reads and payment recovery are scoped to that principal. Plugin lifecycle and binding control operations require the `FINBRIDGE_ADMIN` role. Bindings are persisted using compare-and-set revisions; runtime snapshots are rebuilt from active persisted bindings at startup. The host serializes single-process binding publication and records control-plane audit events. This does not claim multi-host coordination.
 
 ## Alternatives
 
@@ -32,6 +34,7 @@ Capability-level bindings match the business requirement and let the router reje
 
 - Database commit and process snapshot publication need recovery handling.
 - Stale writes must return a conflict, not silently overwrite another administrator's change.
+- Authentication is an in-process service boundary only; credential issuance, HTTP filters/endpoints, and external identity federation are not part of M5.
 
 ## Revisit Conditions
 

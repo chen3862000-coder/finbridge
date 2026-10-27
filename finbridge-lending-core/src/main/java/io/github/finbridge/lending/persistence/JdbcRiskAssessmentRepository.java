@@ -221,6 +221,18 @@ public class JdbcRiskAssessmentRepository implements RiskAssessmentRepository {
             statement.setObject(3, attemptId);
             requireOne(statement.executeUpdate(), "Risk workflow step was already closed");
         }
+        if (assessment.decision() == AssessmentDecision.APPROVE) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE origination_workflows SET state = 'PAYMENT_PENDING', version = version + 1, "
+                            + "updated_at = ? WHERE tenant_id = ? AND application_id = ? "
+                            + "AND state = 'RISK_COMPLETED' AND completed_assessment_id = ?")) {
+                statement.setTimestamp(1, Timestamp.from(now));
+                statement.setObject(2, assessment.tenantId());
+                statement.setObject(3, assessment.applicationId());
+                statement.setObject(4, assessment.assessmentId());
+                requireOne(statement.executeUpdate(), "Approved workflow could not advance to payment pending");
+            }
+        }
     }
 
     private static void requireOne(int rows, String message) {

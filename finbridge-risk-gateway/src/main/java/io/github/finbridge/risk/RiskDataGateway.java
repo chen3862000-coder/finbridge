@@ -2,6 +2,7 @@ package io.github.finbridge.risk;
 
 import io.github.finbridge.runtime.InvocationKind;
 import io.github.finbridge.runtime.PluginInvocationLease;
+import io.github.finbridge.runtime.PluginOperationMetrics;
 import io.github.finbridge.runtime.PluginRuntime;
 import io.github.finbridge.spi.Capability;
 import io.github.finbridge.spi.OperationContext;
@@ -26,11 +27,18 @@ public final class RiskDataGateway {
     private final PluginRuntime runtime;
     private final ExecutorService executor;
     private final Duration timeout;
+    private final PluginOperationMetrics metrics;
 
     public RiskDataGateway(PluginRuntime runtime, ExecutorService executor, Duration timeout) {
+        this(runtime, executor, timeout, null);
+    }
+
+    public RiskDataGateway(PluginRuntime runtime, ExecutorService executor, Duration timeout,
+            PluginOperationMetrics metrics) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.timeout = Objects.requireNonNull(timeout, "timeout");
+        this.metrics = metrics;
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
@@ -68,7 +76,23 @@ public final class RiskDataGateway {
             return RiskProviderOutcome.failure(executionId, null, "CAPABILITY_UNAVAILABLE",
                     Duration.ZERO);
         }
-        return invokeWithLease(lease, type, request, operation, executionId);
+        RiskProviderOutcome outcome = invokeWithLease(lease, type, request, operation, executionId);
+        if (metrics != null) {
+            PluginOperationMetrics.Outcome metricOutcome = outcome.result() != null
+                    ? PluginOperationMetrics.Outcome.SUCCESS : metricOutcome(outcome.failureCode());
+            metrics.record(PluginOperationMetrics.Operation.RISK_QUERY, metricOutcome, outcome.duration());
+        }
+        return outcome;
+    }
+
+    static PluginOperationMetrics.Outcome metricOutcome(String code) {
+        if (code != null && code.contains("TIMEOUT")) {
+            return PluginOperationMetrics.Outcome.TIMEOUT;
+        }
+        if (code != null && code.contains("SATURATED")) {
+            return PluginOperationMetrics.Outcome.REJECTED;
+        }
+        return PluginOperationMetrics.Outcome.FAILURE;
     }
 
     private RiskProviderOutcome invokeWithLease(PluginInvocationLease lease, RiskDataType type,

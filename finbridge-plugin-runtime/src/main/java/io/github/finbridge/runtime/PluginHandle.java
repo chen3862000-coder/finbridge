@@ -72,6 +72,14 @@ public final class PluginHandle {
         transition(PluginLifecycleState.DRAINING, "PLUGIN_DRAINING");
     }
 
+    public synchronized void resumeFromDrain() {
+        requireState(PluginLifecycleState.DRAINING);
+        if (activeInvocations != 0) {
+            throw new IllegalStateException("Cannot resume a draining plugin with active invocations");
+        }
+        transition(PluginLifecycleState.ACTIVE, "PLUGIN_DRAIN_CANCELLED");
+    }
+
     public synchronized PluginInvocationLease acquire(InvocationKind kind) {
         Objects.requireNonNull(kind, "kind");
         boolean eligible = state == PluginLifecycleState.ACTIVE
@@ -115,6 +123,15 @@ public final class PluginHandle {
         }
         closeProviderAndLoader();
         transition(PluginLifecycleState.UNLOADED, "PLUGIN_UNLOADED");
+    }
+
+    synchronized void discardLoaded() throws IOException {
+        requireState(PluginLifecycleState.LOADED);
+        if (activeInvocations != 0) {
+            throw new IllegalStateException("Cannot discard a loaded plugin with invocations");
+        }
+        closeProviderAndLoader();
+        transition(PluginLifecycleState.UNLOADED, "PLUGIN_LOAD_DISCARDED");
     }
 
     <T> T invoke(Function<FinBridgePlugin, T> invocation) {

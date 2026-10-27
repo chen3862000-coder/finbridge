@@ -1,7 +1,7 @@
 # ADR-008: Durable Loan Origination Workflow
 
-- **Status:** Proposed, awaiting v2 M0 approval
-- **Date:** 2026-10-26
+- **Status:** Accepted for M4/M5 implementation
+- **Date:** 2026-10-27
 
 ## Context
 
@@ -10,6 +10,8 @@ Loan origination spans local database changes and external risk/payment calls. A
 ## Decision
 
 Use a PostgreSQL-backed workflow/process-manager state machine with short local transactions, optimistic step transitions, idempotency keys, durable attempts, and explicit resume/reconciliation. Make workflow state authoritative across restart. Keep provider calls outside DB transactions. Do not add Temporal, Camunda, Kafka, or an event bus in the MVP.
+
+M5 adds an explicit single-host startup recovery coordinator. It marks persisted payment dispatches left in `SUBMISSION_IN_PROGRESS` as `UNKNOWN`, then reconciles unresolved payments only through the immutable stored provider owner and client/provider reference. Recovery never resubmits a dispatch, changes provider, or retries terminal `FAILED` payments. Coordinator execution is idempotent and can be invoked on each process start; distributed worker leases, host fencing, automatic retries, and multi-host recovery are excluded.
 
 ## Alternatives
 

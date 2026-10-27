@@ -205,6 +205,28 @@ class RiskAssessmentServiceTest {
                 .evaluate(tenant, application.applicationId(), "corr-start"));
     }
 
+    @Test
+    void startupRecoveryAttemptsEachPersistedInterruptedRiskWorkflowAndContinuesOnFailure() {
+        UUID tenant = UUID.randomUUID();
+        UUID firstId = UUID.randomUUID();
+        UUID secondId = UUID.randomUUID();
+        OriginationWorkflowRepository workflows = mock(OriginationWorkflowRepository.class);
+        RiskAssessmentService service = service(mock(LendingApplicationService.class), workflows,
+                mock(RiskAssessmentRepository.class), mock(RiskDataGateway.class));
+        when(workflows.interruptedRiskWorkflows()).thenReturn(List.of(
+                new OriginationWorkflowRepository.WorkflowRecoveryCandidate(tenant, firstId),
+                new OriginationWorkflowRepository.WorkflowRecoveryCandidate(tenant, secondId)));
+        when(workflows.findByApplication(tenant, firstId))
+                .thenReturn(Optional.of(workflow(tenant, firstId, 0)));
+        when(workflows.findByApplication(tenant, secondId))
+                .thenThrow(new IllegalStateException("synthetic recovery read failure"));
+
+        var summary = service.recoverInterruptedWorkflows();
+        assertEquals(2, summary.candidates());
+        assertEquals(0, summary.recovered());
+        assertEquals(2, summary.failures());
+    }
+
     private static RiskAssessmentService service(LendingApplicationService applications,
             OriginationWorkflowRepository workflows, RiskAssessmentRepository assessments,
             RiskDataGateway gateway) {

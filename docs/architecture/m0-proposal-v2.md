@@ -378,7 +378,13 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 
 ### M5 — Hot Swap, Security, and Observability
 
-- Implement upgrades/rollback, draining, retention, authorization, tenant isolation, audit, metrics/traces, runtime recovery, and lifecycle/security tests.
+- Persist allowlisted artifact identity/checksum, desired active state, tenant capability bindings with optimistic revisions, and append-only lifecycle audit events. Restore active plugins and bindings on single-host startup after checksum verification.
+- Enforce tenant operations through authenticated host service facades and admin-only plugin lifecycle/binding operations. The trusted principal is supplied by Spring Security; HTTP endpoints, credential issuance, external identity, and UI are not M5 scope.
+- Implement safe upgrade/rollback by changing only future routing, draining and unloading only when no binding, invocation lease, or unresolved payment owner references an artifact. Wire M4 owner retention into the host lifecycle manager.
+- Add explicit idempotent startup payment recovery: claimed-but-not-recorded dispatches become `UNKNOWN`; unresolved transactions are query-only through the original provider version. No blind resend, terminal-failure retry, multi-host fencing, or distributed worker guarantee.
+- Add append-only lifecycle audit, Micrometer counters/timers and bounded observations without tenant/application/payment IDs in metric labels; add lifecycle, authorization, tenant isolation, restart recovery, and real PostgreSQL integration tests.
+
+**M5 approved design baseline:** ADR-005, ADR-006, and ADR-008 accepted on 2026-10-27. The host remains a trusted single-process composition; local prebuilt artifacts are allowlisted, not uploaded, signed, or sandboxed. Binding publication and recovery are single-host only.
 
 ### M6 — FinBridge Console
 

@@ -43,6 +43,13 @@ public interface LendingAggregateRepository extends OriginationWorkflowRepositor
 
     Optional<DisbursementClaim> findDisbursement(UUID tenantId, UUID loanId);
 
+    java.util.List<DisbursementClaim> findUnresolvedDisbursements();
+
+    java.util.List<PaymentTransaction> findUnresolvedPaymentTransactions();
+
+    void markPaymentOwnerUnavailable(UUID tenantId, UUID paymentTransactionId,
+            UUID attemptId, Instant now);
+
     boolean hasUnresolvedPaymentOwner(PluginKey owner);
 
     record DisbursementClaim(PaymentTransaction transaction, Loan loan, RepaymentPlan plan,

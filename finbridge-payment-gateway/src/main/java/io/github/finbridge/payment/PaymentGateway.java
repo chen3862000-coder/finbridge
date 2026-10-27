@@ -4,6 +4,7 @@ import io.github.finbridge.runtime.InvocationKind;
 import io.github.finbridge.runtime.PluginHandle;
 import io.github.finbridge.runtime.PluginInvocationLease;
 import io.github.finbridge.runtime.PluginRuntime;
+import io.github.finbridge.runtime.PluginOperationMetrics;
 import io.github.finbridge.spi.OperationContext;
 import io.github.finbridge.spi.PluginKey;
 import io.github.finbridge.spi.payment.DisbursementRequest;
@@ -25,10 +26,16 @@ import java.util.concurrent.TimeoutException;
 public final class PaymentGateway {
     private final ExecutorService executor;
     private final Duration timeout;
+    private final PluginOperationMetrics metrics;
 
     public PaymentGateway(ExecutorService executor, Duration timeout) {
+        this(executor, timeout, null);
+    }
+
+    public PaymentGateway(ExecutorService executor, Duration timeout, PluginOperationMetrics metrics) {
         this.executor = Objects.requireNonNull(executor, "executor");
         this.timeout = Objects.requireNonNull(timeout, "timeout");
+        this.metrics = metrics;
         if (timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
@@ -40,10 +47,12 @@ public final class PaymentGateway {
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(context, "context");
+        long started = System.nanoTime();
         try {
-            return invoke(runtime.plugin(owner), owner, request, context, false);
+            return measure(invoke(runtime.plugin(owner), owner, request, context, false), false, started);
         } catch (IllegalArgumentException | IllegalStateException unavailable) {
-            return DisbursementOutcome.unknown(owner, "PAYMENT_PROVIDER_UNAVAILABLE");
+            return measure(DisbursementOutcome.unknown(owner, "PAYMENT_PROVIDER_UNAVAILABLE"),
+                    false, started);
         }
     }
 
@@ -53,14 +62,41 @@ public final class PaymentGateway {
         Objects.requireNonNull(runtime, "runtime");
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(context, "context");
+        long started = System.nanoTime();
         PaymentTransactionRef transaction = providerTransactionId == null
                 ? PaymentTransactionRef.byClientReference(paymentTransactionId, idempotencyKey)
                 : new PaymentTransactionRef(providerTransactionId);
         try {
-            return invoke(runtime.plugin(owner), owner, transaction, context, true);
+            return measure(invoke(runtime.plugin(owner), owner, transaction, context, true), true, started);
         } catch (IllegalArgumentException | IllegalStateException unavailable) {
-            return DisbursementOutcome.unknown(owner, "PAYMENT_OWNER_UNAVAILABLE");
+            return measure(DisbursementOutcome.unknown(owner, "PAYMENT_OWNER_UNAVAILABLE"), true, started);
         }
+    }
+
+    private DisbursementOutcome measure(DisbursementOutcome outcome, boolean reconciliation, long started) {
+        if (metrics != null) {
+            PluginOperationMetrics.Outcome metricOutcome = metricOutcome(outcome);
+            metrics.record(reconciliation ? PluginOperationMetrics.Operation.PAYMENT_RECONCILE
+                            : PluginOperationMetrics.Operation.PAYMENT_DISBURSE,
+                    metricOutcome, Duration.ofNanos(Math.max(0, System.nanoTime() - started)));
+        }
+        return outcome;
+    }
+
+    private static PluginOperationMetrics.Outcome metricOutcome(DisbursementOutcome outcome) {
+        String diagnostic = outcome.diagnosticCode();
+        if (diagnostic != null && diagnostic.contains("SATURATED")) {
+            return PluginOperationMetrics.Outcome.REJECTED;
+        }
+        if (diagnostic != null && diagnostic.contains("TIMEOUT")) {
+            return PluginOperationMetrics.Outcome.TIMEOUT;
+        }
+        return switch (outcome.status()) {
+            case SUCCEEDED -> PluginOperationMetrics.Outcome.SUCCESS;
+            case FAILED -> PluginOperationMetrics.Outcome.FAILURE;
+            case PROCESSING -> PluginOperationMetrics.Outcome.PROCESSING;
+            case UNKNOWN -> PluginOperationMetrics.Outcome.UNKNOWN;
+        };
     }
 
     private DisbursementOutcome invoke(PluginHandle handle, PluginKey owner, Object request,
@@ -74,15 +110,7 @@ public final class PaymentGateway {
         }
         AtomicInteger state = new AtomicInteger();
         FutureTask<DisbursementOutcome> task = new FutureTask<>(
-                () -> invokeProvider(lease, owner, request, context, reconciliation)) {
-            @Override
-            public void run() {
-                if (!state.compareAndSet(0, 1)) {
-                    return;
-                }
-                super.run();
-            }
-
+                () -> invokeUnlessCancelled(state, lease, owner, request, context, reconciliation)) {
             @Override
             protected void done() {
                 if (isCancelled() && state.compareAndSet(0, 2)) {
@@ -108,6 +136,14 @@ public final class PaymentGateway {
         } catch (ExecutionException failed) {
             return DisbursementOutcome.unknown(owner, "PAYMENT_PROVIDER_FAILURE");
         }
+    }
+
+    static DisbursementOutcome invokeUnlessCancelled(AtomicInteger state, PluginInvocationLease lease,
+            PluginKey owner, Object request, OperationContext context, boolean reconciliation) {
+        if (!state.compareAndSet(0, 1)) {
+            return DisbursementOutcome.unknown(owner, "PAYMENT_CALL_INTERRUPTED");
+        }
+        return invokeProvider(lease, owner, request, context, reconciliation);
     }
 
     private static DisbursementOutcome invokeProvider(PluginInvocationLease lease, PluginKey owner,

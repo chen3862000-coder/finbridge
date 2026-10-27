@@ -25,7 +25,9 @@ class PaymentGatewayConfigurationTest {
             assertTrue(ran.await(2, TimeUnit.SECONDS));
             assertTrue(worker.get().isDaemon());
             assertTrue(worker.get().getName().startsWith("finbridge-payment-"));
-            assertNotNull(configuration.paymentGateway(executor, Duration.ofMillis(50)));
+            assertNotNull(configuration.paymentGateway(executor, Duration.ofMillis(50),
+                    new io.github.finbridge.runtime.PluginOperationMetrics(
+                            new io.micrometer.core.instrument.simple.SimpleMeterRegistry())));
         } finally {
             executor.shutdownNow();
         }

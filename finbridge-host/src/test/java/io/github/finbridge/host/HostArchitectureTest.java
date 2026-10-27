@@ -13,4 +13,13 @@ class HostArchitectureTest {
                 .resideInAnyPackage("io.github.finbridge.plugins.alphapay..")
                 .check(classes);
     }
+
+    @Test
+    void runtimeAndSecurityPackagesAreNotImportedByLendingDomain() {
+        var classes = new ClassFileImporter().importPackages("io.github.finbridge.lending.domain");
+        noClasses().should().dependOnClassesThat()
+                .resideInAnyPackage("io.github.finbridge.host..", "org.springframework.security..",
+                        "io.github.finbridge.runtime..")
+                .check(classes);
+    }
 }

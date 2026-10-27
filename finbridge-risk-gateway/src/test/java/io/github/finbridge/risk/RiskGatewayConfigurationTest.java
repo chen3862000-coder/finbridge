@@ -18,6 +18,7 @@ class RiskGatewayConfigurationTest {
     void createsDecisionPolicyAndBoundedDaemonExecutor() throws Exception {
         RiskGatewayConfiguration configuration = new RiskGatewayConfiguration();
         assertNotNull(configuration.syntheticRiskDecisionPolicy());
+        assertEquals("risk unavailable", new RiskGatewayException("risk unavailable").getMessage());
         ExecutorService executor = configuration.riskProviderExecutor();
         CountDownLatch ran = new CountDownLatch(1);
         AtomicReference<Thread> worker = new AtomicReference<>();
@@ -41,7 +42,9 @@ class RiskGatewayConfigurationTest {
         try {
             RiskDataGateway gateway = configuration.riskDataGateway(
                     new PluginRuntime(Path.of("plugins"), getClass().getClassLoader(), 1),
-                    executor, Duration.ofMillis(250));
+                    executor, new io.github.finbridge.runtime.PluginOperationMetrics(
+                            new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+                    Duration.ofMillis(250));
             assertNotNull(gateway);
             assertEquals("risk unavailable", new RiskGatewayException("risk unavailable").getMessage());
         } finally {

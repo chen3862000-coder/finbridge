@@ -106,8 +106,27 @@ public class DisbursementService {
         return origination.getDisbursement(tenantId, loanId);
     }
 
+    public int recoverUnresolvedPayments() {
+        int recovered = 0;
+        for (PaymentTransaction transaction : aggregates.findUnresolvedPaymentTransactions()) {
+            try {
+                reconcile(transaction.tenantId(), transaction.loanId(), "startup-payment-recovery");
+            } catch (LendingCoreException unavailable) {
+                aggregates.markPaymentOwnerUnavailable(transaction.tenantId(),
+                        transaction.paymentTransactionId(), transaction.dispatchAttemptId(), clock.instant());
+            }
+            recovered++;
+        }
+        return recovered;
+    }
+
     private DisbursementClaim persistOutcome(UUID tenantId, DisbursementClaim claim,
             PaymentGateway.DisbursementOutcome outcome, Instant now) {
+        if ("PAYMENT_OWNER_UNAVAILABLE".equals(outcome.diagnosticCode())) {
+            aggregates.markPaymentOwnerUnavailable(tenantId,
+                    claim.transaction().paymentTransactionId(), claim.transaction().dispatchAttemptId(), now);
+            return origination.getDisbursement(tenantId, claim.loan().loanId());
+        }
         Instant confirmedAt = outcome.status() == PaymentStatus.SUCCEEDED ? now : null;
         LocalDate disbursementDate = confirmedAt == null ? null
                 : LocalDate.ofInstant(confirmedAt, ZoneOffset.UTC);

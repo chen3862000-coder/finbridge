@@ -93,9 +93,9 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                         + "AND status = 'APPROVED'",
                 Timestamp.from(loan.createdAt()), loan.tenantId(), loan.applicationId());
         requireOne(applicationUpdated, "Approved application changed before loan origination");
-        int workflowUpdated = jdbc.update("UPDATE origination_workflows SET state = 'PAYMENT_PENDING', "
-                        + "version = version + 1, updated_at = ? WHERE tenant_id = ? AND application_id = ? "
-                        + "AND state = 'RISK_COMPLETED' AND completed_assessment_id IS NOT NULL",
+        int workflowUpdated = jdbc.update("UPDATE origination_workflows SET version = version + 1, "
+                        + "updated_at = ? WHERE tenant_id = ? AND application_id = ? "
+                        + "AND state = 'PAYMENT_PENDING' AND completed_assessment_id IS NOT NULL",
                 Timestamp.from(loan.createdAt()), loan.tenantId(), loan.applicationId());
         requireOne(workflowUpdated, "Risk workflow is not ready for payment intent");
     }
@@ -118,6 +118,14 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
             throw new LendingCoreException("Risk workflow is not resumable from " + workflow.state());
         }
         return transactions.execute(status -> startRiskTransaction(tenantId, applicationId, now));
+    }
+
+    @Override
+    public List<WorkflowRecoveryCandidate> interruptedRiskWorkflows() {
+        return jdbc.query("SELECT tenant_id, application_id "
+                        + "FROM origination_workflows WHERE state = 'RISK_RUNNING' ORDER BY updated_at",
+                (row, ignored) -> new WorkflowRecoveryCandidate(row.getObject("tenant_id", UUID.class),
+                        row.getObject("application_id", UUID.class)));
     }
 
     @Override
@@ -168,6 +176,22 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
     @Override
     public Optional<DisbursementClaim> findDisbursement(UUID tenantId, UUID loanId) {
         return disbursements.findDisbursement(tenantId, loanId);
+    }
+
+    @Override
+    public List<DisbursementClaim> findUnresolvedDisbursements() {
+        return disbursements.findUnresolvedDisbursements();
+    }
+
+    @Override
+    public List<PaymentTransaction> findUnresolvedPaymentTransactions() {
+        return disbursements.findUnresolvedPaymentTransactions();
+    }
+
+    @Override
+    public void markPaymentOwnerUnavailable(UUID tenantId, UUID paymentTransactionId,
+            UUID attemptId, java.time.Instant now) {
+        disbursements.markPaymentOwnerUnavailable(tenantId, paymentTransactionId, attemptId, now);
     }
 
     @Override
@@ -226,7 +250,8 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
                 this::mapApplication, tenantId, applicationId).stream().findFirst()
                 .orElseThrow(() -> new LendingCoreException("Loan application was not found"));
         OriginationWorkflow current = findWorkflowForUpdate(tenantId, applicationId);
-        if (current != null && current.state() == OriginationWorkflowState.RISK_COMPLETED) {
+        if (current != null && (current.state() == OriginationWorkflowState.RISK_COMPLETED
+                || current.state() == OriginationWorkflowState.PAYMENT_PENDING)) {
             return current;
         }
         validateRiskStart(application, current);

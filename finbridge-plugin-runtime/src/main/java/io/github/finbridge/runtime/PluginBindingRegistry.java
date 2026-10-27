@@ -37,6 +37,38 @@ final class PluginBindingRegistry {
         }
     }
 
+    PluginBinding restore(UUID tenantId, Capability capability, PluginKey pluginKey, long version) {
+        BindingKey key = new BindingKey(tenantId, capability);
+        PluginBinding restored = new PluginBinding(tenantId, capability, pluginKey, version);
+        while (true) {
+            Map<BindingKey, PluginBinding> current = snapshot.get();
+            if (current.containsKey(key)) {
+                throw new IllegalStateException("Binding is already restored");
+            }
+            Map<BindingKey, PluginBinding> updated = new HashMap<>(current);
+            updated.put(key, restored);
+            if (snapshot.compareAndSet(current, Map.copyOf(updated))) {
+                return restored;
+            }
+        }
+    }
+
+    PluginBinding publish(PluginBinding binding) {
+        BindingKey key = new BindingKey(binding.tenantId(), binding.capability());
+        while (true) {
+            Map<BindingKey, PluginBinding> current = snapshot.get();
+            PluginBinding present = current.get(key);
+            if (present != null && binding.version() <= present.version()) {
+                throw new IllegalStateException("Published binding revision must advance monotonically");
+            }
+            Map<BindingKey, PluginBinding> updated = new HashMap<>(current);
+            updated.put(key, binding);
+            if (snapshot.compareAndSet(current, Map.copyOf(updated))) {
+                return binding;
+            }
+        }
+    }
+
     long unbind(UUID tenantId, Capability capability, long expectedVersion) {
         BindingKey key = new BindingKey(tenantId, capability);
         while (true) {
@@ -51,6 +83,22 @@ final class PluginBindingRegistry {
             updated.remove(key);
             if (snapshot.compareAndSet(current, Map.copyOf(updated))) {
                 return version + 1;
+            }
+        }
+    }
+
+    long publishUnbind(UUID tenantId, Capability capability, long nextVersion) {
+        BindingKey key = new BindingKey(tenantId, capability);
+        while (true) {
+            Map<BindingKey, PluginBinding> current = snapshot.get();
+            PluginBinding present = current.get(key);
+            if (present == null || present.version() + 1 != nextVersion) {
+                throw new IllegalStateException("Persisted unbind revision is inconsistent with runtime snapshot");
+            }
+            Map<BindingKey, PluginBinding> updated = new HashMap<>(current);
+            updated.remove(key);
+            if (snapshot.compareAndSet(current, Map.copyOf(updated))) {
+                return nextVersion;
             }
         }
     }

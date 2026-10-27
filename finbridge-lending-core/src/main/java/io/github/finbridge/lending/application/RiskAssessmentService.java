@@ -58,6 +58,24 @@ public class RiskAssessmentService {
                 .orElseThrow(() -> new LendingCoreException("Risk assessment was not found"));
     }
 
+    public WorkflowRecoverySummary recoverInterruptedWorkflows() {
+        List<OriginationWorkflowRepository.WorkflowRecoveryCandidate> candidates =
+                workflows.interruptedRiskWorkflows();
+        int recovered = 0;
+        int failures = 0;
+        for (var candidate : candidates) {
+            try {
+                evaluate(candidate.tenantId(), candidate.applicationId(), "startup-risk-recovery");
+                recovered++;
+            } catch (RuntimeException unavailableDuringRecovery) {
+                failures++;
+            }
+        }
+        return new WorkflowRecoverySummary(candidates.size(), recovered, failures);
+    }
+
+    public record WorkflowRecoverySummary(int candidates, int recovered, int failures) { }
+
     private RiskAssessment evaluateApplication(UUID tenantId, UUID applicationId,
                                                String correlationId) {
         OriginationWorkflow workflow = beginOrResume(tenantId, applicationId);
