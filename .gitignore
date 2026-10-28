@@ -2,4 +2,11 @@
 **/target/
 frontend/node_modules/
 frontend/dist/
+finbridge-demo-app/plugins/
+deploy/tls/localhost.key
+deploy/tls/localhost.crt
+deploy/tls/truststore.p12
 .DS_Store
+.env
+.env.*
+!.env.example

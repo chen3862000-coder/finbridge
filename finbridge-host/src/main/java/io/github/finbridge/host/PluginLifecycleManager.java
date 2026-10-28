@@ -393,4 +393,14 @@ public final class PluginLifecycleManager {
         return controlPlane.bindings(tenantId);
     }
 
+    public List<PluginControlPlaneRepository.RegisteredArtifact> artifacts() {
+        HostAuthorization.requireAdministrator();
+        return controlPlane.artifacts();
+    }
+
+    public List<PluginControlPlaneRepository.TenantSummary> tenants() {
+        HostAuthorization.requireAdministrator();
+        return controlPlane.tenants();
+    }
+
 }

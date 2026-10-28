@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-The v2 ADRs are **proposed**, not accepted. They capture the choices recommended for review before implementation. Update status to `Accepted` only after explicit M0 approval; revise an accepted decision with a new ADR rather than rewriting history. The ADR set has been revised for v2; prior v1 ADR files are not separately archived.
+The v2 ADRs were proposed for M0 review; accepted decisions are marked individually below. Update a decision to `Accepted` only after explicit user approval; revise an accepted decision with a new ADR rather than rewriting history. ADR-014 records the user's M7 approval of the local authenticated borrower demo boundary. The ADR set has been revised for v2; prior v1 ADR files are not separately archived.
 
 | ADR | Decision |
 |---|---|
@@ -17,5 +17,6 @@ The v2 ADRs are **proposed**, not accepted. They capture the choices recommended
 | [ADR-011](ADR-011-postgresql-persistence.md) | PostgreSQL for durable platform state |
 | [ADR-012](ADR-012-synthetic-risk-policy.md) | User-approved deterministic synthetic risk policy |
 | [ADR-013](ADR-013-durable-risk-step-recovery.md) | Durable M3 risk-step recovery; payment workflow remains M4 |
+| [ADR-014](ADR-014-authenticated-borrower-demo-api.md) | Accepted M7 synthetic borrower API with local OIDC, BFF sessions, and server-derived tenant mapping |
 
 Related active plan and evidence status: [M0 architecture proposal v2](../architecture/m0-proposal-v2.md). The original [v1 proposal](../architecture/m0-proposal.md) is superseded history.

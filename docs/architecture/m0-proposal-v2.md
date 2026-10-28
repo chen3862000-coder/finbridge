@@ -3,7 +3,7 @@
 **Status:** Active approved design baseline for M1; remaining M0 policy choices are still open for M2 review.  
 **Specification:** FinBridge Coding Agent Implementation Prompt v2.0  
 **JDK:** Java 21, fixed requirement  
-**Original scope:** M0 architecture redesign and bounded technical validation only. User subsequently authorized proceeding to M1. M2-M7 remain gated.  
+**Original scope:** M0 architecture redesign and bounded technical validation only. User subsequently authorized M1 through M6 and the M7 authenticated local borrower demo layer in ADR-014. The broader M7 documentation/portfolio release checklist remains open.
 **Principle:** One Stable Lending Core. Pluggable Risk and Payment Providers. Complete Loan Origination. Safe Runtime Evolution.
 
 ## 1. Executive Proposal
@@ -322,9 +322,9 @@ Current active documents: this v2 proposal and v2 ADRs. The old `m0-proposal.md`
 | `04-risk-decision-and-data-gateway.md` | M3 | Actual policy/gateway classes and partial-failure tests. |
 | `05-payment-gateway-and-disbursement.md` | M4 | Idempotency, UNKNOWN, owner and reconciliation evidence. |
 | `06-repayment-plan-design.md` | M2 | Formula, rounding examples, due-date policy, executable tests. |
-| `07-spi-contract-design.md` | M1 | Actual interfaces, descriptors, compatibility tests. |
-| `08-classloader-isolation.md` | M1 | Real conflicting-JAR test output and known limits. |
-| `09-plugin-lifecycle.md` | M1/M5 | Implemented state machine, lease/drain tests and recovery behavior. |
+| `02-spi-contract-design.md` | M1 | Actual interfaces, descriptors, compatibility tests. |
+| `03-classloader-isolation.md` | M1 | Real conflicting-JAR test output and known limits. |
+| `04-plugin-lifecycle.md` | M1/M5 | Implemented state machine, lease/drain tests and recovery behavior. |
 | `10-multi-tenant-routing.md` | M1/M5 | Binding schema, authorization and concurrent update tests. |
 | `11-transaction-consistency.md` | M4 | DB boundaries, crash points, workflow/payment recovery tests; Saga/outbox comparison. |
 | `12-security-reliability-observability.md` | M5 | Authorization tests, metrics/traces and bounded claims. |
@@ -351,7 +351,7 @@ The quality policy was confirmed by the user: SpotBugs (maintained FindBugs succ
 - Implement SPI, runtime, ServiceLoader discovery, external provider packaging, class-loader isolation, lifecycle, routing foundation, compatibility, and runtime integration tests.
 - Prove provider implementations are absent from host runtime package.
 
-**M1 implementation status:** Implemented and verified in the current workspace. See `docs/architecture/01-system-overview.md` through `04-plugin-lifecycle.md` and the M1 review record in `docs/quality/architecture-review-checklist.md`. This completion does not authorize M2.
+**M1 implementation status:** Implemented and verified in the current workspace. See the M1 review record in `docs/quality/architecture-review-checklist.md`. The M7 architecture set now includes all 13 planned topics; SPI, class-loader, and lifecycle documents retain their original established filenames (`02-spi-contract-design.md`, `03-classloader-isolation.md`, `04-plugin-lifecycle.md`) for link stability.
 
 The full reactor uses an empty aggregator POM and a test-only integration module, so those modules have no production classes to analyze for JaCoCo. Surefire runs the integration architecture/package tests. Each production Java module runs SpotBugs/PMD, and JaCoCo enforces the configured module bundle/class/method threshold. The final `clean verify` passed with no missing-test or missing-coverage failures in production modules.
 
@@ -368,7 +368,7 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 - Implement risk gateway, CreditScoreX/BlacklistY/FraudSignalZ, normalization, tenant routing, deterministic core-owned policy, evidence persistence, and risk workflow tests.
 - Persist origination workflow and risk-step attempt state. External risk reads remain outside DB transactions. Recovery can repeat this read-only risk step and persist the assessment/decision without duplicate application transitions using unique keys and optimistic versions. Disbursement/payment recovery remains M4.
 
-**M3 implementation status:** Implemented in the current workspace; final root quality verification is pending. The synthetic risk policy and durable retry boundary are recorded as accepted ADR-012/013. See those ADRs and the M3 review/requirement traceability record in `docs/quality/architecture-review-checklist.md`. The policy is demonstration-only and not validated underwriting.
+**M3 implementation status:** Implemented and covered by the passing root Java quality gate. The synthetic risk policy and durable retry boundary are recorded as accepted ADR-012/013 and the M3 traceability record in `docs/quality/architecture-review-checklist.md`. The policy is demonstration-only and not validated underwriting.
 
 ### M4 — Payment and Durable Disbursement Workflow
 
@@ -384,7 +384,7 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 - Add explicit idempotent startup payment recovery: claimed-but-not-recorded dispatches become `UNKNOWN`; unresolved transactions are query-only through the original provider version. No blind resend, terminal-failure retry, multi-host fencing, or distributed worker guarantee.
 - Add append-only lifecycle audit, Micrometer counters/timers and bounded observations without tenant/application/payment IDs in metric labels; add lifecycle, authorization, tenant isolation, restart recovery, and real PostgreSQL integration tests.
 
-**M5 approved design baseline:** ADR-005, ADR-006, and ADR-008 accepted on 2026-10-27. The host remains a trusted single-process composition; local prebuilt artifacts are allowlisted, not uploaded, signed, or sandboxed. Binding publication and recovery are single-host only.
+**M5 approved design baseline:** ADR-005, ADR-006, and ADR-008 accepted on 2026-10-27. The host remains a trusted single-process composition; local prebuilt artifacts are allowlisted, not uploaded, signed, or sandboxed. Binding publication and recovery are single-host only. HTTP identity for the local demo composition was subsequently approved separately in ADR-014; that does not alter provider or payment invariants.
 
 ### M6 — FinBridge Console
 
@@ -392,7 +392,23 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 
 ### M7 — Documentation and Portfolio Release
 
-- Complete all 13 architecture documents, 10+ ADRs, guides, six mandatory demos, README, portfolio case study, screenshots, Docker Compose, clean-clone verification, tests, and repository hygiene review.
+- Complete and verify the 13 architecture topics, 10+ ADRs, implementation guides, seven evidence-linked demo walkthroughs, README, portfolio case study, screenshots, Docker Compose, clean-clone verification, tests, and repository hygiene review. The architecture topics, five guides, seven walkthrough documents, and case study now exist. Walkthroughs 1 and 7 have live evidence; walkthroughs 2-6 describe module-test evidence and explicitly state they have not been independently live-executed. M7 remains open until those live walkthroughs are run where applicable, screenshots are captured, clean-clone and repository-hygiene checks are recorded, and final review is complete. Existing SPI/class-loader/lifecycle documents retain their established filenames to avoid breaking links.
+- **Approved scope:** add an authenticated client API demo layer so a synthetic borrower can apply for a loan and query application, approval/workflow, loan, repayment, and payment status. This extends M7 only; it does not change the M5/M6 baseline. The local demo API and authenticated journey are implemented; the broader M7 documentation, portfolio, screenshots, and clean-clone release checklist remain pending.
+
+#### Approved Client API Demo Layer (ADR-014)
+
+The demo should exercise the public borrower journey over HTTP rather than calling application services directly. Keep the borrower/client API separate from admin plugin-management routes and from internal Lending Core services.
+
+- **Topology:** add a runnable Spring Boot host/API composition that owns the existing `finbridge-host` controllers/facades, database migrations, and Spring Security configuration. Add a borrower page that uses only the public client API. Compose the API, Console, PostgreSQL, Keycloak 26.3.5 OIDC for local synthetic accounts, and an HTTPS reverse proxy. The OIDC provider and local test accounts are development fixtures, not a custom or fake authentication implementation and not production identity infrastructure.
+- **Authentication:** use OpenID Connect Authorization Code flow with PKCE. Validate issuer, audience, signature, expiry/not-before, state, nonce, and redirect URI using the provider's metadata and keys. Do not accept a username, tenant ID, role, or identity header supplied by the browser as proof of identity. Never put signing keys, client secrets, or long-lived credentials in the frontend or repository.
+- **Session and transport:** prefer a same-origin Backend-for-Frontend (BFF). Terminate HTTPS at the local development reverse proxy, use secure `HttpOnly`, `SameSite` session cookies, CSRF protection for state-changing requests, restrictive CORS (same origin by default), and security headers. Keep OIDC access/refresh tokens server-side; do not persist bearer tokens in browser local/session storage. The local Compose certificate and seeded accounts are for development only and must be clearly labeled.
+- **Tenant authorization:** after validating the OIDC identity, resolve the `(issuer, subject)` to an enabled user and tenant membership using server-owned configuration/persistence. Construct the trusted `FinBridgePrincipal` from that mapping for each request. Derive tenant scope exclusively from this principal. Never trust a client-supplied tenant ID, application ID ownership claim, or tenant claim unless the issuer claim is explicitly validated and mapped server-side. Deny unknown, disabled, unmapped, and cross-tenant access by default. Keep admin authority separately mapped and require `ROLE_FINBRIDGE_ADMIN`; borrower identities must not gain admin access.
+- **Borrower API flow:** expose narrowly scoped operations to list supported products, submit an application with an idempotency key and exact decimal-string amount, read the caller's application and synthetic risk/approval/workflow status, and read the caller's loan, repayment plan, and disbursement status. Return only the minimum fields needed by the simulator. Do not expose plugin routing/lifecycle controls, provider credentials, raw risk evidence, or another tenant's records.
+- **Demo behavior:** seed distinct synthetic borrower identities mapped to different demo tenants. Demonstrate login, application submission, idempotent replay, approval/review/rejection status, workflow progression, loan and repayment queries, logout/session expiry, and denied cross-tenant/object-ID substitution. Use only synthetic risk/payment providers and never trigger a real provider effect.
+- **Verification gate:** add HTTP-level tests through the actual security filters and OIDC validation boundary. Cover valid and invalid/expired/tampered tokens, issuer/audience mismatch, unmapped user, missing/disabled membership, tenant A versus tenant B reads/actions, caller-selected tenant-ID rejection, object ownership denial, CSRF, secure-cookie/session behavior, borrower/admin role separation, exact decimal transport, idempotency, and loan/payment state semantics. A controller unit test or a test that directly installs `FinBridgePrincipal` in `SecurityContext` is not evidence that authentication is correctly wired over HTTP.
+- **Security boundary and limits:** the local OIDC provider validates application integration, not the security of an external identity provider. Document local-only accounts/secrets, TLS termination, trust roots, session storage, and single-host limitations. Do not claim production-ready identity, authorization certification, multi-host session guarantees, or real underwriting/payment integration.
+
+This approved M7 demo composition extends the M5 boundary that leaves credential issuance, HTTP filters, and external identity to the containing application (ADR-005). ADR-014 selects Keycloak for this local demo only and records the BFF/session architecture, server-side user-to-tenant mapping, local HTTPS boundary, verification evidence, and untested token edge cases. No production identity provider is selected. The local Compose stack includes the runnable API and borrower UI; it is not production-ready or a production identity recommendation.
 
 Every milestone ends with functionality, files, decisions, database changes, tests/results, docs, limitations, risks, and next gate. No milestone is inferred complete from plans or interfaces alone.
 
@@ -404,6 +420,7 @@ Every milestone ends with functionality, files, decisions, database changes, tes
 4. Install FraudSignalZ externally and use it without host rebuild/restart.
 5. AlphaPay v1->v2 upgrade/rollback preserving in-flight/historical ownership and avoiding duplicates.
 6. Two conflicting private dependency versions loaded and invoked under separate plugin loaders.
+7. Authenticated synthetic borrower applies, sees the synthetic approval/workflow and loan status, then a different mapped borrower is denied access to that application through the real OIDC/security HTTP boundary.
 
 Each demo needs a walkthrough, commands, expected results, test references, and actual execution evidence.
 

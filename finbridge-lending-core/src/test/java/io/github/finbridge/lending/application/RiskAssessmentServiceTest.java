@@ -2,6 +2,7 @@ package io.github.finbridge.lending.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -115,7 +116,7 @@ class RiskAssessmentServiceTest {
         RiskAssessmentRepository assessments = mock(RiskAssessmentRepository.class);
         RiskDataGateway gateway = mock(RiskDataGateway.class);
         when(assessments.findLatest(tenant, applicationId)).thenReturn(Optional.empty());
-        org.junit.jupiter.api.Assertions.assertThrows(LendingCoreException.class,
+        assertThrows(LendingCoreException.class,
                 () -> service(applications, workflows, assessments, gateway).getLatest(tenant, applicationId));
     }
 
@@ -174,7 +175,7 @@ class RiskAssessmentServiceTest {
         when(workflows.findByApplication(tenant, applicationId)).thenReturn(Optional.of(completed));
         when(assessments.findById(tenant, assessmentId)).thenReturn(Optional.empty());
 
-        org.junit.jupiter.api.Assertions.assertThrows(LendingCoreException.class,
+        assertThrows(LendingCoreException.class,
                 () -> service(applications, workflows, assessments, gateway)
                         .evaluate(tenant, applicationId, "corr-missing-result"));
     }
@@ -225,6 +226,21 @@ class RiskAssessmentServiceTest {
         assertEquals(2, summary.candidates());
         assertEquals(0, summary.recovered());
         assertEquals(2, summary.failures());
+    }
+
+    @Test
+    void readsAllAssessmentsThroughTenantAndApplicationScopedRepositoryQuery() {
+        UUID tenant = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        RiskAssessmentRepository assessments = mock(RiskAssessmentRepository.class);
+        RiskAssessmentService service = service(mock(LendingApplicationService.class),
+                mock(OriginationWorkflowRepository.class), assessments, mock(RiskDataGateway.class));
+        RiskAssessment assessment = mock(RiskAssessment.class);
+        when(assessments.findAll(tenant, applicationId)).thenReturn(List.of(assessment));
+
+        assertEquals(List.of(assessment), service.getAll(tenant, applicationId));
+        verify(assessments).findAll(tenant, applicationId);
+        assertThrows(NullPointerException.class, () -> service.getAll(null, applicationId));
     }
 
     private static RiskAssessmentService service(LendingApplicationService applications,

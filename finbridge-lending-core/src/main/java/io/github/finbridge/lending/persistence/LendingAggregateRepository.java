@@ -6,6 +6,7 @@ import io.github.finbridge.lending.domain.PaymentTransaction;
 import io.github.finbridge.spi.PluginKey;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -13,6 +14,8 @@ public interface LendingAggregateRepository extends OriginationWorkflowRepositor
     Optional<Loan> findLoanByApplication(UUID tenantId, UUID applicationId);
 
     Optional<Loan> findLoan(UUID tenantId, UUID loanId);
+
+    List<Loan> findRecentLoans(UUID tenantId, int limit);
 
     Optional<RepaymentPlan> findRepaymentPlan(UUID tenantId, UUID loanId);
 
@@ -43,9 +46,9 @@ public interface LendingAggregateRepository extends OriginationWorkflowRepositor
 
     Optional<DisbursementClaim> findDisbursement(UUID tenantId, UUID loanId);
 
-    java.util.List<DisbursementClaim> findUnresolvedDisbursements();
+    List<DisbursementClaim> findUnresolvedDisbursements();
 
-    java.util.List<PaymentTransaction> findUnresolvedPaymentTransactions();
+    List<PaymentTransaction> findUnresolvedPaymentTransactions();
 
     void markPaymentOwnerUnavailable(UUID tenantId, UUID paymentTransactionId,
             UUID attemptId, Instant now);

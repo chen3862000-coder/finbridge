@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.Currency;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -53,6 +54,14 @@ public class JdbcLoanApplicationRepository implements LoanApplicationRepository 
     }
 
     @Override
+    public List<LoanApplication> findRecent(UUID tenantId, int limit) {
+        requireLimit(limit);
+        return jdbc.query("SELECT * FROM loan_applications WHERE tenant_id = ? "
+                        + "ORDER BY created_at DESC, application_id DESC LIMIT ?",
+                this::mapApplication, tenantId, limit);
+    }
+
+    @Override
     public LoanApplication updateStatus(LoanApplication application, long expectedVersion) {
         int updated = jdbc.update("UPDATE loan_applications SET status = ?, updated_at = ?, version = ? "
                         + "WHERE tenant_id = ? AND application_id = ? AND version = ?",
@@ -68,6 +77,12 @@ public class JdbcLoanApplicationRepository implements LoanApplicationRepository 
         return jdbc.query("SELECT * FROM loan_applications WHERE tenant_id = ? AND idempotency_key = ?",
                 (row, rowNumber) -> new IdempotentApplication(mapApplication(row, rowNumber),
                         row.getString("request_fingerprint")), tenantId, key).stream().findFirst();
+    }
+
+    private static void requireLimit(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("limit must be between 1 and 100");
+        }
     }
 
     private LoanApplication mapApplication(ResultSet row, int ignoredRowNumber) throws SQLException {

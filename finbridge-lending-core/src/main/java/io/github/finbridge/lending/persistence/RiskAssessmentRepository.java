@@ -15,6 +15,8 @@ public interface RiskAssessmentRepository extends RiskAssessmentCommandRepositor
 
     Optional<RiskAssessment> findLatest(UUID tenantId, UUID applicationId);
 
+    List<RiskAssessment> findAll(UUID tenantId, UUID applicationId);
+
     @Override
     Optional<RiskAssessment> findById(UUID tenantId, UUID assessmentId);
 

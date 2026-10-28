@@ -1,0 +1,64 @@
+{
+  "realm": "finbridge",
+  "enabled": true,
+  "sslRequired": "external",
+  "attributes": {"frontendUrl": "https://localhost:8443/auth"},
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "clients": [
+    {
+      "clientId": "finbridge-demo",
+      "name": "FinBridge Local Demo BFF",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://localhost:8443/login/oauth2/code/finbridge"],
+      "webOrigins": ["https://localhost:8443"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://localhost:8443/*"
+      }
+    }
+  ],
+  "roles": {"realm": [{"name": "FINBRIDGE_ADMIN"}]},
+  "users": [
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "username": "borrower-alpha",
+      "firstName": "Borrower",
+      "lastName": "Alpha",
+      "email": "borrower-alpha@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "alpha-local-only", "temporary": false}]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000002",
+      "username": "borrower-beta",
+      "firstName": "Borrower",
+      "lastName": "Beta",
+      "email": "borrower-beta@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "beta-local-only", "temporary": false}]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000003",
+      "username": "demo-admin",
+      "firstName": "Demo",
+      "lastName": "Administrator",
+      "email": "demo-admin@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["FINBRIDGE_ADMIN"],
+      "clientRoles": {"realm-management": ["view-realm"]},
+      "credentials": [{"type": "password", "value": "admin-local-only", "temporary": false}]
+    }
+  ]
+}

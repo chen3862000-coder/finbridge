@@ -36,6 +36,7 @@
         <module>finbridge-risk-gateway</module>
         <module>finbridge-payment-gateway</module>
         <module>finbridge-host</module>
+        <module>finbridge-demo-app</module>
         <module>plugins/private-helper-v1</module>
         <module>plugins/private-helper-v2</module>
         <module>plugins/alphapay-v1</module>

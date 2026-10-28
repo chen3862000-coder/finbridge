@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import io.github.finbridge.spi.PluginKey;
 import io.github.finbridge.spi.PluginDescriptor;
@@ -32,6 +33,9 @@ import org.junit.jupiter.api.io.TempDir;
 class PluginRuntimeValidationTest {
     @TempDir
     Path pluginDirectory;
+
+    private static final String CREDIT_SCORE_ARTIFACT =
+            "creditscorex-0.1.0-SNAPSHOT-jar-with-dependencies.jar";
 
     @Test
     void rejectsPathsAndNonPluginArtifactsBeforeLoading() throws IOException {
@@ -179,6 +183,37 @@ class PluginRuntimeValidationTest {
         assertEquals(2, counter.getId().getTags().size());
         assertEquals("payment_reconcile", counter.getId().getTag("operation"));
         assertEquals("unknown", counter.getId().getTag("outcome"));
+    }
+
+    @Test
+    void bindingPublicationRejectsIncapableTargetAndKeepsExistingRoute() throws Exception {
+        PluginRuntime runtime = runtime();
+        PluginHandle first = installRisk(runtime, CREDIT_SCORE_ARTIFACT, "creditscorex");
+        PluginHandle second = installRisk(runtime, "blacklisty-0.1.0-SNAPSHOT-jar-with-dependencies.jar",
+                "blacklisty");
+        UUID tenant = UUID.randomUUID();
+        runtime.restoreBinding(tenant, Capability.CREDIT_SCORE, first.key(), 1);
+        var inFlight = runtime.route(tenant, Capability.CREDIT_SCORE, InvocationKind.BUSINESS);
+
+        assertThrows(IllegalStateException.class, () -> runtime.publishBinding(
+                new PluginBinding(tenant, Capability.CREDIT_SCORE, second.key(), 2)));
+        var next = runtime.route(tenant, Capability.CREDIT_SCORE, InvocationKind.BUSINESS);
+
+        assertSame(first, inFlight.handle());
+        assertSame(first, next.handle());
+        assertEquals(1, runtime.binding(tenant, Capability.CREDIT_SCORE).version());
+        inFlight.close();
+        next.close();
+    }
+
+    private PluginHandle installRisk(PluginRuntime runtime, String artifact, String pluginDirectoryName)
+            throws Exception {
+        Path source = Path.of(System.getProperty("finbridge.root"), "plugins", pluginDirectoryName,
+                "target", artifact);
+        Files.copy(source, pluginDirectory.resolve(artifact));
+        PluginHandle handle = runtime.install(artifact, context());
+        runtime.activate(handle.key());
+        return handle;
     }
 
     @Test

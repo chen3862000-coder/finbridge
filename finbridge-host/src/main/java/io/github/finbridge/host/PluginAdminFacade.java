@@ -66,6 +66,16 @@ public class PluginAdminFacade {
         return lifecycle.bindings(tenantId);
     }
 
+    public List<PluginControlPlaneRepository.RegisteredArtifact> artifacts() {
+        requireAdmin();
+        return lifecycle.artifacts();
+    }
+
+    public List<PluginControlPlaneRepository.TenantSummary> tenants() {
+        requireAdmin();
+        return lifecycle.tenants();
+    }
+
     public List<PluginControlPlaneRepository.PluginLifecycleAuditEvent> auditEvents(PluginKey key) {
         requireAdmin();
         return lifecycle.events(key);

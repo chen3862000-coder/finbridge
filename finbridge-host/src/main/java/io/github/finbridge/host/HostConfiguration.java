@@ -2,7 +2,12 @@ package io.github.finbridge.host;
 
 import io.github.finbridge.runtime.PluginOperationMetrics;
 import io.github.finbridge.runtime.PluginRuntime;
+import io.github.finbridge.lending.application.LendingApplicationService;
+import io.github.finbridge.lending.application.RiskAssessmentService;
+import io.github.finbridge.lending.application.DisbursementService;
+import io.github.finbridge.lending.application.LoanOriginationService;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -21,15 +26,28 @@ public class HostConfiguration {
     }
 
     @Bean
+    public org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer
+            decimalValuesAsStrings() {
+        return builder -> builder.serializerByType(BigDecimal.class,
+                com.fasterxml.jackson.databind.ser.std.ToStringSerializer.instance);
+    }
+
+    @Bean
     public PluginRuntime pluginRuntime(
             @Value("${finbridge.plugin-directory:plugins}") Path pluginDirectory) {
         return HostRuntime.create(pluginDirectory);
     }
 
     @Bean
+    public TenantLendingFacade tenantLendingFacade(LendingApplicationService applications,
+            RiskAssessmentService risk, DisbursementService payments, LoanOriginationService origination,
+            TenantConsoleReadRepository consoleReads) {
+        return new TenantLendingFacade(applications, risk, payments, origination, consoleReads);
+    }
+
+    @Bean
     public PluginRecoveryRunner pluginRecoveryRunner(
-            io.github.finbridge.lending.application.RiskAssessmentService risk,
-            io.github.finbridge.lending.application.DisbursementService disbursements) {
+            RiskAssessmentService risk, DisbursementService disbursements) {
         return new PluginRecoveryRunner(risk, disbursements);
     }
 

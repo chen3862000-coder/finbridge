@@ -6,4 +6,5 @@ import java.util.UUID;
 
 public interface LoanApplicationLookup {
     Optional<LoanApplication> find(UUID tenantId, UUID applicationId);
+
 }

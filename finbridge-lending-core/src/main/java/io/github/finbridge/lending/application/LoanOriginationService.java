@@ -13,6 +13,7 @@ import io.github.finbridge.lending.persistence.LoanApplicationLookup;
 import io.github.finbridge.lending.persistence.LoanProductRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -69,6 +70,10 @@ public class LoanOriginationService {
                 .orElseThrow(() -> new LendingCoreException("Loan was not found"));
     }
 
+    public List<Loan> listLoans(UUID tenantId, int limit) {
+        return aggregates.findRecentLoans(tenantId, limit);
+    }
+
     public LendingAggregateRepository.DisbursementClaim getDisbursement(UUID tenantId, UUID loanId) {
         return aggregates.findDisbursement(tenantId, loanId)
                 .orElseThrow(() -> new LendingCoreException("Disbursement was not found"));
@@ -85,6 +90,7 @@ public class LoanOriginationService {
         public java.util.Optional<LoanApplication> find(UUID tenantId, UUID applicationId) {
             return delegate.find(tenantId, applicationId);
         }
+
     }
 
     private static final class LoanProductLookupBoundary {

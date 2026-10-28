@@ -109,6 +109,36 @@ class JdbcLendingCoreIntegrationTest {
     }
 
     @Test
+    void consoleListQueriesAreTenantScopedBoundedAndDeterministicallyOrdered() {
+        UUID secondTenant = UUID.randomUUID();
+        jdbc.update("INSERT INTO tenants (tenant_id, tenant_code) VALUES (?, ?)",
+                secondTenant, "CONSOLE_TEST_" + secondTenant.toString().substring(0, 8));
+        Instant firstAt = Instant.parse("2026-03-10T10:00:00Z");
+        Instant secondAt = firstAt.plusSeconds(5);
+        LoanApplication first = application(tenantId, UUID.randomUUID(), 0, ApplicationStatus.SUBMITTED);
+        LoanApplication newest = application(tenantId, UUID.randomUUID(), 0, ApplicationStatus.SUBMITTED);
+        LoanApplication otherTenant = application(secondTenant, UUID.randomUUID(), 0, ApplicationStatus.SUBMITTED);
+        applicationRepository.insert(first, "console-first-key", "a".repeat(64));
+        applicationRepository.insert(newest, "console-newest-key", "b".repeat(64));
+        applicationRepository.insert(otherTenant, "console-other-key", "c".repeat(64));
+        jdbc.update("UPDATE loan_applications SET created_at = ?, updated_at = ? WHERE application_id = ?",
+                java.sql.Timestamp.from(firstAt), java.sql.Timestamp.from(firstAt), first.applicationId());
+        jdbc.update("UPDATE loan_applications SET created_at = ?, updated_at = ? WHERE application_id = ?",
+                java.sql.Timestamp.from(secondAt), java.sql.Timestamp.from(secondAt), newest.applicationId());
+
+        assertEquals(List.of(newest.applicationId(), first.applicationId()),
+                applicationRepository.findRecent(tenantId, 10).stream()
+                        .map(LoanApplication::applicationId).toList());
+        assertEquals(List.of(newest.applicationId()),
+                applicationRepository.findRecent(tenantId, 1).stream()
+                        .map(LoanApplication::applicationId).toList());
+        assertEquals(List.of(), aggregateRepository.findRecentLoans(tenantId, 10));
+        assertEquals(1, productRepository.findAllActive().size());
+        assertThrows(IllegalArgumentException.class, () -> applicationRepository.findRecent(tenantId, 0));
+        assertThrows(IllegalArgumentException.class, () -> aggregateRepository.findRecentLoans(tenantId, 101));
+    }
+
+    @Test
     void applicationInsertReplayIsIdempotentAndPayloadMismatchConflicts() {
         String fingerprint = "a".repeat(64);
         LoanApplication created = applicationRepository.insert(application, "create-key", fingerprint);
@@ -219,6 +249,8 @@ class JdbcLendingCoreIntegrationTest {
         assessmentRepository.save(assessment);
         RiskAssessment loaded = assessmentRepository.findLatest(tenantId, application.applicationId())
                 .orElseThrow();
+        assertEquals(List.of(assessment.assessmentId()), assessmentRepository.findAll(tenantId,
+                application.applicationId()).stream().map(RiskAssessment::assessmentId).toList());
         assertEquals(AssessmentDecision.APPROVE, loaded.decision());
         assertEquals("creditscorex", loaded.providers().getFirst().pluginId());
         assertEquals(List.of("SCORE_ACCEPTABLE"), loaded.reasonCodes());
@@ -238,6 +270,9 @@ class JdbcLendingCoreIntegrationTest {
                 workflow.version(), List.of(), now);
         UUID assessmentId = claim.assessment().assessmentId();
         assertEquals(AssessmentStatus.PENDING, claim.assessment().status());
+        var runningStep = aggregateRepository.findSteps(tenantId, application.applicationId()).getFirst();
+        assertEquals("RUNNING", runningStep.state());
+        assertEquals(null, runningStep.completedAt());
         var reference = new RiskAssessment.ProviderExecutionReference(UUID.randomUUID(),
                 "creditscorex", "1.0.0", "CREDIT_SCORE");
         var completed = new RiskAssessment(assessmentId, application.applicationId(), tenantId,
@@ -255,6 +290,9 @@ class JdbcLendingCoreIntegrationTest {
         assertEquals("COMPLETED", jdbc.queryForObject(
                 "SELECT state FROM origination_workflow_steps WHERE attempt_id = ?",
                 String.class, workflow.activeRiskAttemptId()));
+        var completedStep = aggregateRepository.findSteps(tenantId, application.applicationId()).getFirst();
+        assertEquals("COMPLETED", completedStep.state());
+        assertEquals(now.plusSeconds(1), completedStep.completedAt());
     }
 
     @Test

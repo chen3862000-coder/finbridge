@@ -13,6 +13,7 @@ import io.github.finbridge.spi.PluginKey;
 import io.github.finbridge.spi.payment.PaymentStatus;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.OffsetDateTime;
 import java.sql.Timestamp;
 import java.util.Currency;
 import java.util.List;
@@ -50,6 +51,20 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
     public Optional<Loan> findLoan(UUID tenantId, UUID loanId) {
         return jdbc.query("SELECT * FROM loans WHERE tenant_id = ? AND loan_id = ?",
                 this::mapLoan, tenantId, loanId).stream().findFirst();
+    }
+
+    @Override
+    public List<Loan> findRecentLoans(UUID tenantId, int limit) {
+        requireLimit(limit);
+        return jdbc.query("SELECT * FROM loans WHERE tenant_id = ? "
+                        + "ORDER BY created_at DESC, loan_id DESC LIMIT ?",
+                this::mapLoan, tenantId, limit);
+    }
+
+    private static void requireLimit(int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("limit must be between 1 and 100");
+        }
     }
 
     @Override
@@ -369,6 +384,28 @@ public class JdbcLendingAggregateRepository implements LendingAggregateRepositor
     public Optional<OriginationWorkflow> findByApplication(UUID tenantId, UUID applicationId) {
         return jdbc.query("SELECT * FROM origination_workflows WHERE tenant_id = ? AND application_id = ?",
                 this::mapWorkflow, tenantId, applicationId).stream().findFirst();
+    }
+
+    @Override
+    public List<WorkflowStepView> findSteps(UUID tenantId, UUID applicationId) {
+        return jdbc.query("SELECT step.attempt_id, step.step_name, step.state, step.attempt_number, "
+                        + "step.started_at, step.completed_at, step.assessment_id, "
+                        + "step.payment_transaction_id, step.failure_code "
+                        + "FROM origination_workflow_steps step JOIN origination_workflows workflow "
+                        + "ON workflow.workflow_id = step.workflow_id "
+                        + "WHERE workflow.tenant_id = ? AND workflow.application_id = ? "
+                        + "ORDER BY step.started_at, step.attempt_number",
+                (row, ignored) -> new WorkflowStepView(row.getObject("attempt_id", UUID.class),
+                        row.getString("step_name"), row.getString("state"), row.getInt("attempt_number"),
+                        row.getObject("started_at", OffsetDateTime.class).toInstant(),
+                        timestampInstant(row.getObject("completed_at", OffsetDateTime.class)),
+                        row.getObject("assessment_id", UUID.class),
+                        row.getObject("payment_transaction_id", UUID.class), row.getString("failure_code")),
+                tenantId, applicationId);
+    }
+
+    private static java.time.Instant timestampInstant(OffsetDateTime timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
     }
 
     private void insertLoan(Loan loan) {

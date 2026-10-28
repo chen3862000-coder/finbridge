@@ -1,0 +1,38 @@
+server:
+  forward-headers-strategy: framework
+  tomcat:
+    remoteip:
+      internal-proxies: ".*"
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        secure: true
+        same-site: lax
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/finbridge}
+    username: ${SPRING_DATASOURCE_USERNAME:finbridge}
+    password: ${SPRING_DATASOURCE_PASSWORD:finbridge-local-only}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 2
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+  security:
+    oauth2:
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+finbridge:
+  plugin-directory: ${FINBRIDGE_PLUGIN_DIRECTORY:plugins}
+  demo:
+    oidc-issuer: ${FINBRIDGE_OIDC_ISSUER:https://localhost:8443/auth/realms/finbridge}
+    bootstrap-plugins: ${FINBRIDGE_DEMO_BOOTSTRAP_PLUGINS:false}

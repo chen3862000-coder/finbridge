@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.inOrder;
 
 import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.runtime.PluginHandle;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -102,7 +103,9 @@ class HostAuthorizationTest {
         var risk = mock(io.github.finbridge.lending.application.RiskAssessmentService.class);
         var payments = mock(io.github.finbridge.lending.application.DisbursementService.class);
         var origination = mock(io.github.finbridge.lending.application.LoanOriginationService.class);
-        TenantLendingFacade facade = new TenantLendingFacade(applications, risk, payments, origination);
+        var consoleReads = mock(TenantConsoleReadRepository.class);
+        TenantLendingFacade facade = new TenantLendingFacade(applications, risk, payments, origination,
+                consoleReads);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(new FinBridgePrincipal("tenant-user", tenant), "", List.of()));
         var command = org.mockito.ArgumentCaptor.forClass(
@@ -159,6 +162,32 @@ class HostAuthorizationTest {
     }
 
     @Test
+    void borrowerFacadeScopesSyntheticApplicantAndApplicationListToPrincipal() {
+        UUID tenant = UUID.randomUUID();
+        var applications = mock(io.github.finbridge.lending.application.LendingApplicationService.class);
+        var facade = new TenantLendingFacade(applications,
+                mock(io.github.finbridge.lending.application.RiskAssessmentService.class),
+                mock(io.github.finbridge.lending.application.DisbursementService.class),
+                mock(io.github.finbridge.lending.application.LoanOriginationService.class),
+                mock(TenantConsoleReadRepository.class));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new FinBridgePrincipal("borrower-a", tenant), "", List.of()));
+        var created = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        when(applications.createApplication(org.mockito.ArgumentMatchers.any())).thenReturn(created);
+        when(applications.listApplications(tenant, 10)).thenReturn(List.of());
+
+        assertEquals(created, facade.applyForCurrentTenant("self", "CASH_LOAN_DEMO",
+                new java.math.BigDecimal("1200.00"), java.util.Currency.getInstance("CNY"), 3, "borrower-key"));
+        var command = org.mockito.ArgumentCaptor.forClass(
+                io.github.finbridge.lending.application.CreateLoanApplicationCommand.class);
+        verify(applications).createApplication(command.capture());
+        assertEquals(tenant, command.getValue().tenantId());
+        assertEquals("demo-borrower-a-self", command.getValue().applicantId());
+        assertEquals(List.of(), facade.listApplicationsForCurrentTenant(10));
+        verify(applications).listApplications(tenant, 10);
+    }
+
+    @Test
     void tenantFacadePreservesNotFoundCauseAndDoesNotCallApplicationServicesAnonymously() {
         UUID tenant = UUID.randomUUID();
         UUID applicationId = UUID.randomUUID();
@@ -166,7 +195,9 @@ class HostAuthorizationTest {
         var risk = mock(io.github.finbridge.lending.application.RiskAssessmentService.class);
         var payments = mock(io.github.finbridge.lending.application.DisbursementService.class);
         var origination = mock(io.github.finbridge.lending.application.LoanOriginationService.class);
-        TenantLendingFacade facade = new TenantLendingFacade(applications, risk, payments, origination);
+        var consoleReads = mock(TenantConsoleReadRepository.class);
+        TenantLendingFacade facade = new TenantLendingFacade(applications, risk, payments, origination,
+                consoleReads);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(new FinBridgePrincipal("tenant-user", tenant), "", List.of()));
         var missing = new io.github.finbridge.lending.application.LendingCoreException("missing");
@@ -190,6 +221,18 @@ class HostAuthorizationTest {
         PluginAdminFacade facade = new PluginAdminFacade(lifecycle);
         PluginKey key = new PluginKey("admin-pay", "1.0.0");
         UUID tenant = UUID.randomUUID();
+        PluginHandle handle = mock(PluginHandle.class);
+        when(lifecycle.install("artifact.jar")).thenReturn(handle);
+        when(lifecycle.activate(key)).thenReturn(handle);
+        when(lifecycle.upgrade(tenant, io.github.finbridge.spi.Capability.DISBURSE, 1,
+                "replacement.jar", java.time.Duration.ZERO)).thenReturn(handle);
+        when(lifecycle.rollback(tenant, key, io.github.finbridge.spi.Capability.DISBURSE, 2,
+                java.time.Duration.ZERO)).thenReturn(handle);
+        when(lifecycle.bindings(tenant)).thenReturn(List.of());
+        when(lifecycle.artifacts()).thenReturn(List.of());
+        when(lifecycle.tenants()).thenReturn(List.of());
+        when(lifecycle.events(key)).thenReturn(List.of());
+        when(lifecycle.drain(key, java.time.Duration.ZERO)).thenReturn(true);
         assertThrows(AccessDeniedException.class, () -> facade.activate(key));
         verifyNoInteractions(lifecycle);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
@@ -207,6 +250,8 @@ class HostAuthorizationTest {
         facade.unload(key, java.time.Duration.ZERO);
         facade.auditEvents(key);
         facade.bindings(tenant);
+        assertEquals(List.of(), facade.artifacts());
+        assertEquals(List.of(), facade.tenants());
         verify(lifecycle).install("artifact.jar");
         verify(lifecycle).activate(key);
         verify(lifecycle).bind(tenant, io.github.finbridge.spi.Capability.DISBURSE, key, 0);
@@ -221,5 +266,7 @@ class HostAuthorizationTest {
         verify(lifecycle).unload(key, java.time.Duration.ZERO);
         verify(lifecycle).events(key);
         verify(lifecycle).bindings(tenant);
+        verify(lifecycle).artifacts();
+        verify(lifecycle).tenants();
     }
 }

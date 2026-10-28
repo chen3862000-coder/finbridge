@@ -110,6 +110,9 @@ class PluginControlPlaneIntegrationTest {
     void repositoryQueriesRegisteredNamesAndRequiresBindingsToBeRemovedBeforeDrain() {
         repository.updateBinding(tenantId, Capability.DISBURSE, v1, 0, "operator");
 
+        assertEquals(2, repository.artifacts().size());
+        assertEquals(tenantId, repository.tenants().stream()
+                .filter(tenant -> tenant.tenantId().equals(tenantId)).findFirst().orElseThrow().tenantId());
         assertEquals(v1, repository.registeredArtifactName("pay-v1.jar").orElseThrow().key());
         assertEquals(v2, repository.findArtifact(v2).orElseThrow().key());
         assertEquals(1, repository.bindings(v1).size());

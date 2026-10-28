@@ -14,4 +14,10 @@ public interface OriginationWorkflowRepository {
     record WorkflowRecoveryCandidate(UUID tenantId, UUID applicationId) { }
 
     Optional<OriginationWorkflow> findByApplication(UUID tenantId, UUID applicationId);
+
+    java.util.List<WorkflowStepView> findSteps(UUID tenantId, UUID applicationId);
+
+    record WorkflowStepView(UUID attemptId, String stepName, String state, int attemptNumber,
+            Instant startedAt, Instant completedAt, UUID assessmentId, UUID paymentTransactionId,
+            String failureCode) { }
 }

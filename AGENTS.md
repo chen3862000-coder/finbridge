@@ -29,6 +29,17 @@ See `docs/quality/quality-gates.md` for the configured plugins, thresholds, repo
 - **Architecture:** Add ArchUnit/module-boundary tests beginning in M1. Enforce dependency direction, prevent Lending Core imports of provider implementations, and prove host packaging omits concrete providers.
 - **Coverage scope:** Apply production coverage thresholds to production modules. Test-only modules (for example `integration-tests`) may skip JaCoCo because they contain no production classes, but their test sources must still run through Surefire and the blocking PMD rules.
 
+## Required Regression and E2E Verification
+
+Before declaring a substantial change or milestone complete, run all applicable regression gates from the repository root. Do not treat compilation or unit tests alone as end-to-end evidence.
+
+1. **Java regression gate:** Run `./mvnw --batch-mode --no-transfer-progress clean verify` under JDK 21. Report the exact result, test totals, and Enforcer, PMD, SpotBugs, and JaCoCo outcomes. Do not skip tests or quality checks.
+2. **Frontend regression gate:** Run `npm ci`, `npm run build`, `npm test`, and `npm audit --omit=dev` in `frontend/`. Report production-only audit scope accurately; do not imply development dependencies were audited if they were omitted.
+3. **Compose configuration and smoke gate:** Run `docker compose config --quiet`, then `docker compose up -d`. Verify service health with `docker compose ps`, inspect startup failures with `docker compose logs`, confirm PostgreSQL is healthy and has the expected synthetic seed records, and request the Console at `http://localhost:5173`. Run `git diff --check`. After verification, stop the environment with `docker compose down` unless the user asked to leave it running. Use `docker compose down -v` only when intentionally discarding local data and reinitializing the database.
+4. **Full API E2E gate:** Only claim this gate when a runnable API host is included and started, not from the current UI+PostgreSQL Compose smoke test. Verify tenant and admin flows over HTTP through the configured authentication boundary. Tenant identity must come from the trusted Spring Security `FinBridgePrincipal`; admin routes must require `ROLE_FINBRIDGE_ADMIN`. Cover tenant isolation/denial, synthetic application creation, risk/workflow and loan/repayment views, exact decimal transport, disbursement/reconciliation ownership and ambiguity, and admin plugin registry/routing/lifecycle controls. Do not add a fake identity provider, accept caller-selected tenant IDs, or trigger real provider effects for testing. If no runnable authenticated API host is available, state that full API E2E is blocked and list the missing host/auth prerequisites; do not report the UI+database smoke test as API E2E.
+
+Record requirement -> implementation -> test/evidence -> documentation traceability in `docs/quality/architecture-review-checklist.md`. Report exact commands and observed results, including any gate not run and why.
+
 ## Required Design and Implementation Review
 
 For each milestone and substantial change, complete `docs/quality/architecture-review-checklist.md` before reporting completion. Compare the actual diff and tests against the active proposal/ADRs; do not infer conformance from a passing build. Record requirement -> module/class -> test -> documentation links for important claims. Explain deviations and update the proposal/ADR before implementing an approved change. Review findings and unresolved gaps must be reported before a summary of completed work.

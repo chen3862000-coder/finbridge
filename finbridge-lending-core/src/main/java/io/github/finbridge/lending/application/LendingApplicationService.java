@@ -12,6 +12,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +47,11 @@ public class LendingApplicationService {
     public LoanApplication getApplication(UUID tenantId, UUID applicationId) {
         return applications.find(tenantId, applicationId)
                 .orElseThrow(() -> new LendingCoreException("Loan application was not found"));
+    }
+
+    public List<LoanApplication> listApplications(UUID tenantId, int limit) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        return applications.findRecent(tenantId, limit);
     }
 
     public LoanApplication startRiskEvaluation(UUID tenantId, UUID applicationId) {
@@ -111,6 +117,11 @@ public class LendingApplicationService {
         @Override
         public Optional<LoanApplication> find(UUID tenantId, UUID applicationId) {
             return delegate.find(tenantId, applicationId);
+        }
+
+        @Override
+        public List<LoanApplication> findRecent(UUID tenantId, int limit) {
+            return delegate.findRecent(tenantId, limit);
         }
 
         @Override

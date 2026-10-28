@@ -79,6 +79,17 @@ public class PluginControlPlaneRepository {
                         row.getBoolean("retained_work")));
     }
 
+    public List<RegisteredArtifact> artifacts() {
+        return jdbc.query("SELECT * FROM plugin_artifacts ORDER BY plugin_id, plugin_version",
+                this::mapArtifact);
+    }
+
+    public List<TenantSummary> tenants() {
+        return jdbc.query("SELECT tenant_id, tenant_code FROM tenants ORDER BY tenant_code",
+                (row, ignored) -> new TenantSummary(row.getObject("tenant_id", UUID.class),
+                        row.getString("tenant_code")));
+    }
+
     public Optional<RegisteredArtifact> findArtifact(PluginKey key) {
         return jdbc.query("SELECT * FROM plugin_artifacts WHERE plugin_id = ? AND plugin_version = ?",
                 this::mapArtifact, key.pluginId(), key.pluginVersion()).stream().findFirst();
@@ -395,4 +406,6 @@ public class PluginControlPlaneRepository {
 
     public record PluginLifecycleAuditEvent(UUID eventId, PluginKey key, String eventType,
             String actor, java.time.Instant occurredAt, String diagnosticCode) { }
+
+    public record TenantSummary(UUID tenantId, String tenantCode) { }
 }

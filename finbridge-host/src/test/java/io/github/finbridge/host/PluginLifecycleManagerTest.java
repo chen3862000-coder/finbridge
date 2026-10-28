@@ -631,6 +631,8 @@ class PluginLifecycleManagerTest {
                 () -> lifecycle.events(key));
         assertThrows(org.springframework.security.access.AccessDeniedException.class,
                 () -> lifecycle.bindings(UUID.randomUUID()));
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, lifecycle::artifacts);
+        assertThrows(org.springframework.security.access.AccessDeniedException.class, lifecycle::tenants);
         verify(controlPlane, never()).lifecycleEvents(any());
     }
 
@@ -656,15 +658,24 @@ class PluginLifecycleManagerTest {
     void administratorCanReadDurableLifecycleEventsAndBindings() {
         PluginKey key = new PluginKey("audited-risk", "1.0.0");
         UUID tenant = UUID.randomUUID();
+        var artifact = new PluginControlPlaneRepository.RegisteredArtifact(ARTIFACT, key, "a".repeat(64),
+                PluginType.RISK_DATA, Set.of(CAPABILITY), "ACTIVE", false);
+        var tenantSummary = new PluginControlPlaneRepository.TenantSummary(tenant, "SYNTHETIC_TENANT");
         var event = new PluginControlPlaneRepository.PluginLifecycleAuditEvent(UUID.randomUUID(), key,
                 "PLUGIN_LOADED", "operator", java.time.Instant.parse("2026-03-01T10:00:00Z"), "LOADED");
         when(controlPlane.lifecycleEvents(key)).thenReturn(List.of(event));
         when(controlPlane.bindings(tenant)).thenReturn(List.of());
+        when(controlPlane.artifacts()).thenReturn(List.of(artifact));
+        when(controlPlane.tenants()).thenReturn(List.of(tenantSummary));
 
         assertEquals(List.of(event), lifecycle.events(key));
         assertEquals(List.of(), lifecycle.bindings(tenant));
+        assertEquals(List.of(artifact), lifecycle.artifacts());
+        assertEquals(List.of(tenantSummary), lifecycle.tenants());
         verify(controlPlane).lifecycleEvents(key);
         verify(controlPlane).bindings(tenant);
+        verify(controlPlane).artifacts();
+        verify(controlPlane).tenants();
         HostAuthorization.requireAdministrator();
     }
 

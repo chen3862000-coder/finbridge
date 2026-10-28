@@ -136,6 +136,22 @@ class LendingApplicationServiceTest {
         assertThrows(LendingCoreException.class, () -> service.getApplication(tenantId, unknown));
     }
 
+    @Test
+    void listsRecentApplicationsOnlyForRequestedTenantAndLimit() {
+        LoanApplication first = application(ApplicationStatus.SUBMITTED, 0);
+        LoanApplication second = application(ApplicationStatus.APPROVED, 1);
+        UUID otherTenant = UUID.randomUUID();
+        applications.applications.put(first.applicationId(), first);
+        applications.applications.put(second.applicationId(), second);
+        applications.applications.put(otherTenant, new LoanApplication(otherTenant, UUID.randomUUID(),
+                "other-applicant", "CASH_LOAN_DEMO", 1, new BigDecimal("1000.00"),
+                Currency.getInstance("CNY"), 3, ApplicationStatus.SUBMITTED, NOW, NOW, 0));
+
+        assertEquals(2, service.listApplications(tenantId, 10).size());
+        assertEquals(1, service.listApplications(tenantId, 1).size());
+        assertThrows(NullPointerException.class, () -> service.listApplications(null, 10));
+    }
+
     private CreateLoanApplicationCommand command(String key, String amount, int term) {
         return new CreateLoanApplicationCommand(tenantId, "synthetic-applicant", "CASH_LOAN_DEMO",
                 new BigDecimal(amount), Currency.getInstance("CNY"), term, key);
@@ -172,6 +188,12 @@ class LendingApplicationServiceTest {
         public Optional<LoanApplication> find(UUID tenant, UUID applicationId) {
             return Optional.ofNullable(applications.get(applicationId))
                     .filter(application -> application.tenantId().equals(tenant));
+        }
+
+        @Override
+        public java.util.List<LoanApplication> findRecent(UUID tenant, int limit) {
+            return applications.values().stream().filter(application -> application.tenantId().equals(tenant))
+                    .limit(limit).toList();
         }
 
         @Override

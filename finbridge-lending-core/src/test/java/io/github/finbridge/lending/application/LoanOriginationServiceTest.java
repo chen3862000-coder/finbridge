@@ -18,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Currency;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -136,6 +137,16 @@ class LoanOriginationServiceTest {
     }
 
     @Test
+    void listsRecentLoansForTheRequestedTenantAndLimit() {
+        UUID tenant = UUID.randomUUID();
+        List<Loan> expected = List.of(mock(Loan.class));
+        when(aggregates.findRecentLoans(tenant, 7)).thenReturn(expected);
+
+        assertEquals(expected, service.listLoans(tenant, 7));
+        org.mockito.Mockito.verify(aggregates).findRecentLoans(tenant, 7);
+    }
+
+    @Test
     void failsWhenCurrentProductCannotSupplyTheApplicationVersion() {
         UUID tenant = UUID.randomUUID();
         UUID appId = UUID.randomUUID();
@@ -197,6 +208,13 @@ class LoanOriginationServiceTest {
         public Optional<LoanApplication> find(UUID tenant, UUID applicationId) {
             return Optional.ofNullable(applications.get(applicationId))
                     .filter(application -> application.tenantId().equals(tenant));
+        }
+
+        @Override
+        public List<LoanApplication> findRecent(UUID tenant, int limit) {
+            return applications.values().stream()
+                    .filter(application -> application.tenantId().equals(tenant))
+                    .limit(limit).toList();
         }
 
         @Override

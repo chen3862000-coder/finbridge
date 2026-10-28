@@ -58,6 +58,12 @@ public class RiskAssessmentService {
                 .orElseThrow(() -> new LendingCoreException("Risk assessment was not found"));
     }
 
+    public List<RiskAssessment> getAll(UUID tenantId, UUID applicationId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(applicationId, "applicationId");
+        return assessments.findAll(tenantId, applicationId);
+    }
+
     public WorkflowRecoverySummary recoverInterruptedWorkflows() {
         List<OriginationWorkflowRepository.WorkflowRecoveryCandidate> candidates =
                 workflows.interruptedRiskWorkflows();
@@ -79,7 +85,12 @@ public class RiskAssessmentService {
     private RiskAssessment evaluateApplication(UUID tenantId, UUID applicationId,
                                                String correlationId) {
         OriginationWorkflow workflow = beginOrResume(tenantId, applicationId);
-        if (workflow.state() == OriginationWorkflowState.RISK_COMPLETED) {
+        if (workflow.state() == OriginationWorkflowState.RISK_COMPLETED
+                || workflow.state() == OriginationWorkflowState.PAYMENT_PENDING
+                || workflow.state() == OriginationWorkflowState.PAYMENT_SUBMITTING
+                || workflow.state() == OriginationWorkflowState.PAYMENT_RECONCILIATION_REQUIRED
+                || workflow.state() == OriginationWorkflowState.PAYMENT_FAILED
+                || workflow.state() == OriginationWorkflowState.ORIGINATED) {
             return assessments.findById(tenantId, workflow.completedAssessmentId())
                     .orElseThrow(() -> new LendingCoreException("Completed risk assessment was not found"));
         }

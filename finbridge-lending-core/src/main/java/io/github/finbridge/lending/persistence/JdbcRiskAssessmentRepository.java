@@ -257,6 +257,13 @@ public class JdbcRiskAssessmentRepository implements RiskAssessmentRepository {
     }
 
     @Override
+    public List<RiskAssessment> findAll(UUID tenantId, UUID applicationId) {
+        return jdbc.query("SELECT * FROM risk_assessments WHERE tenant_id = ? AND application_id = ? "
+                        + "ORDER BY created_at DESC, assessment_id DESC",
+                this::mapAssessment, tenantId, applicationId);
+    }
+
+    @Override
     public Optional<RiskAssessment> findById(UUID tenantId, UUID assessmentId) {
         return jdbc.query("SELECT * FROM risk_assessments WHERE tenant_id = ? AND assessment_id = ?",
                 this::mapAssessment, tenantId, assessmentId).stream().findFirst();

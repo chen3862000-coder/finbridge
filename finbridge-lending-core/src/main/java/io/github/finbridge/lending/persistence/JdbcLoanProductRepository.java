@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import javax.sql.DataSource;
 import java.util.Currency;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,6 +34,14 @@ public class JdbcLoanProductRepository implements LoanProductRepository {
                         + "maximum_principal, allowed_terms_months, annual_interest_rate_percent "
                         + "FROM loan_products WHERE product_code = ? AND product_version = ?",
                 this::mapProduct, productCode, version).stream().findFirst();
+    }
+
+    @Override
+    public List<LoanProduct> findAllActive() {
+        return jdbc.query("SELECT product_code, product_version, currency, minimum_principal, "
+                        + "maximum_principal, allowed_terms_months, annual_interest_rate_percent "
+                        + "FROM loan_products WHERE active ORDER BY product_code",
+                this::mapProduct);
     }
 
     private LoanProduct mapProduct(ResultSet row, int ignoredRowNumber) throws SQLException {
