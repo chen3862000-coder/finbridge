@@ -14,7 +14,7 @@ FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e
 
 ## Expected Behavior
 
-The live E2E checks Keycloak Authorization Code + PKCE, secure session-cookie attributes and CSRF logout, tampered-state and invalid-authorization-code callback rejection, alpha application creation using exact decimal text, spoofed tenant/applicant/role/risk-scenario fields being ignored, synthetic approval/review/rejection outcomes from fixed server-mapped identities, no loan/payment for non-approved applications, workflow status, loan origination, inactive-before-disbursement plan, successful synthetic disbursement, active loan/plan, payment status and reconciliation, beta denial for alpha's application, beta-to-BetaPay routing, borrower denial to admin routes, and admin denial to borrower routes while allowing admin registry/install/binding/rollback operations.
+The live E2E checks Keycloak Authorization Code + PKCE, secure session-cookie attributes and CSRF logout, tampered-state and invalid-authorization-code callback rejection, and a real Keycloak-signed ID token rejected after the outbound nonce was altered. It also checks alpha application creation using exact decimal text, spoofed tenant/applicant/role/risk-scenario fields being ignored, synthetic approval/review/rejection outcomes from fixed server-mapped identities, no loan/payment for non-approved applications, workflow status, loan origination, inactive-before-disbursement plan, successful synthetic disbursement, active loan/plan, payment status and reconciliation, beta denial for alpha's application, beta-to-BetaPay routing, borrower denial to admin routes, and admin denial to borrower routes while allowing admin registry/install/binding/rollback operations.
 
 ## Evidence
 

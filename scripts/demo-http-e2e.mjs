@@ -210,7 +210,40 @@ async function oidcCallbackRejectionJourney() {
   assert.equal(afterInvalidCode.body.authenticated, false);
   assert.equal(afterInvalidCode.body.administrator, false);
   assert.equal("subject" in afterInvalidCode.body, false);
-  console.log("OIDC negative callback E2E passed: tampered state and invalid authorization code denied");
+
+  const nonceBrowser = new BrowserSession();
+  const nonceAuthorization = await nonceBrowser.request(`${baseUrl}/oauth2/authorization/finbridge`);
+  assert.equal(nonceAuthorization.status, 302);
+  const alteredAuthorizationUrl = new URL(nonceAuthorization.headers.get("location"));
+  assert.ok(alteredAuthorizationUrl.searchParams.has("nonce"), "OIDC request must include a nonce");
+  alteredAuthorizationUrl.searchParams.set("nonce", randomUUID());
+  let response = await nonceBrowser.request(alteredAuthorizationUrl.toString());
+  assert.equal(response.status, 200, "Keycloak should render its real login form");
+  const loginPage = await response.text();
+  const action = loginPage.match(/<form[^>]*action="([^"]+)"[^>]*>/i)?.[1];
+  assert.ok(action, "Keycloak login form must have an action");
+  const fields = [...loginPage.matchAll(
+    /<input[^>]*type="hidden"[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi,
+  )].map(match => [match[1], match[2]]);
+  fields.push(["username", "borrower-alpha"], ["password", "alpha-local-only"]);
+  response = await nonceBrowser.request(action.replaceAll("&amp;", "&"), {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields),
+  });
+  for (let redirect = 0; redirect < 8 && response.status >= 300 && response.status < 400; redirect++) {
+    const location = response.headers.get("location");
+    if (!location) break;
+    response = await nonceBrowser.request(new URL(location, action).toString());
+  }
+  const afterNonceMismatch = await nonceBrowser.json("/api/session");
+  assert.equal(afterNonceMismatch.body.authenticated, false);
+  assert.equal(afterNonceMismatch.body.administrator, false);
+  assert.equal("subject" in afterNonceMismatch.body, false);
+  const protectedRoute = await nonceBrowser.json("/api/borrower/products");
+  assert.equal(protectedRoute.response.status, 302,
+    "real Keycloak callback with a modified nonce must not authorize borrower routes");
+  console.log("OIDC negative callback E2E passed: tampered state, invalid code, and Keycloak-signed nonce mismatch denied");
 }
 
 async function sessionExpiryJourney() {

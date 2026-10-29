@@ -18,7 +18,7 @@ Provider integrations often entangle core decision logic, runtime dependencies, 
 
 ## Evidence
 
-- Root JDK 21 `./mvnw --batch-mode --no-transfer-progress clean verify`: 17 modules passed; 261 tests, 0 failures/errors/skips; Enforcer, PMD, SpotBugs, and JaCoCo passed.
+- Root JDK 21 `./mvnw --batch-mode --no-transfer-progress clean verify`: 17 modules passed; 262 tests, 0 failures/errors/skips; Enforcer, PMD, SpotBugs, and JaCoCo passed.
 - Frontend `npm run build` passed; `npm test` passed 4 tests; `npm audit --omit=dev` reported zero production dependency vulnerabilities. `npm ci` reported 3 full-tree vulnerabilities, including development dependencies.
 - Fresh local Compose stack started with healthy PostgreSQL, Keycloak, and API services. The Console returned HTTP 200 on the local HTTPS route.
 - Authenticated local HTTP E2E passed application/risk (APPROVE, REVIEW, BLACKLIST rejection, critical-fraud rejection), origination, repayment plan, synthetic disbursement/status/reconciliation, BetaPay routing for the beta tenant, runtime FraudSignalZ install/binding, AlphaPay v1/v2 binding rollback, cookie/CSRF logout, spoofed tenant-value rejection, cross-tenant denial, and borrower/admin route separation.

@@ -40,6 +40,10 @@ class OidcIdTokenValidationTest {
                 "valid-nonce"));
         assertInvalidToken(expired, "invalid_id_token");
 
+        var notYetValid = provider(registration, key, claims(ISSUER, CLIENT_ID, NOW.plusSeconds(60),
+                NOW.plusSeconds(120), "valid-nonce"));
+        assertTokenRejected(notYetValid);
+
         var wrongIssuer = provider(registration, key, claims("https://other.test/realm", CLIENT_ID,
                 NOW.minusSeconds(60), NOW.plusSeconds(60), "valid-nonce"));
         assertInvalidToken(wrongIssuer, "invalid_id_token");
@@ -82,6 +86,10 @@ class OidcIdTokenValidationTest {
         OAuth2AuthenticationException failure = assertThrows(OAuth2AuthenticationException.class,
                 () -> provider.authenticate(login("expected-raw-nonce")));
         assertEquals(code, failure.getError().getErrorCode());
+    }
+
+    private static void assertTokenRejected(OidcAuthorizationCodeAuthenticationProvider provider) {
+        assertThrows(OAuth2AuthenticationException.class, () -> provider.authenticate(login("expected-raw-nonce")));
     }
 
     private static OidcAuthorizationCodeAuthenticationProvider provider(ClientRegistration registration,
