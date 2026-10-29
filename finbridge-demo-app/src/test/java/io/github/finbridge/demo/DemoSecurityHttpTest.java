@@ -42,6 +42,10 @@ class DemoSecurityHttpTest {
 
     @Test
     void borrowerRequiresAuthenticationAndCannotAccessAdminRoutes() throws Exception {
+        var anonymousSession = mvc.perform(get("/api/session"))
+                .andExpect(status().isOk()).andReturn();
+        org.junit.jupiter.api.Assertions.assertTrue(anonymousSession.getResponse().getContentAsString()
+                .contains("\"authenticated\":false"));
         var borrower = mvc.perform(get("/api/borrower/applications")).andExpect(status().is3xxRedirection())
                 .andReturn();
         var admin = mvc.perform(get("/api/admin/plugins").with(mappedLogin("alpha-subject", TENANT_ALPHA, false)))

@@ -5,6 +5,7 @@ server:
       internal-proxies: ".*"
   servlet:
     session:
+      timeout: ${FINBRIDGE_DEMO_SESSION_TIMEOUT:30m}
       cookie:
         http-only: true
         secure: true

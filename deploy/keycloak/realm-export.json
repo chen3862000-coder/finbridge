@@ -59,6 +59,36 @@
       "realmRoles": ["FINBRIDGE_ADMIN"],
       "clientRoles": {"realm-management": ["view-realm"]},
       "credentials": [{"type": "password", "value": "admin-local-only", "temporary": false}]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000004",
+      "username": "borrower-alpha-review",
+      "firstName": "Borrower",
+      "lastName": "Review Fixture",
+      "email": "borrower-alpha-review@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "alpha-review-local-only", "temporary": false}]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000005",
+      "username": "borrower-alpha-blacklist",
+      "firstName": "Borrower",
+      "lastName": "Blacklist Fixture",
+      "email": "borrower-alpha-blacklist@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "alpha-blacklist-local-only", "temporary": false}]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000006",
+      "username": "borrower-alpha-fraud",
+      "firstName": "Borrower",
+      "lastName": "Fraud Fixture",
+      "email": "borrower-alpha-fraud@example.invalid",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{"type": "password", "value": "alpha-fraud-local-only", "temporary": false}]
     }
   ]
 }

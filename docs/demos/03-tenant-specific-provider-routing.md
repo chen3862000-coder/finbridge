@@ -19,8 +19,8 @@ Under JDK 21 with Docker available for PostgreSQL Testcontainers, run:
 ./mvnw --batch-mode --no-transfer-progress -pl finbridge-host -am test
 ```
 
-The runtime test should prove optimistic tenant binding and route pinning; the host PostgreSQL test should prove persisted revision changes and stale-revision rejection. The root `clean verify` has passed these tests. This is module-level evidence, not a separate interactive Console walkthrough.
+The runtime test proves optimistic tenant binding and route pinning; the host PostgreSQL test proves persisted revision changes and stale-revision rejection. The root `clean verify` passes these tests. The live two-tenant route change is also demonstrated by the authenticated E2E below.
 
 ## Verification Status
 
-Automated runtime and PostgreSQL tests cover tenant binding revisions and routing. A separate runnable end-user walkthrough with two different provider selections is **not yet documented or live-executed**. The Compose borrower E2E currently uses one synthetic provider configuration shared across seeded tenants.
+Live command from `frontend/`: `FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e`. Observed pass: `Tenant-specific routing E2E passed: beta disbursement used BetaPay`. Admin calls bind beta's `DISBURSE` capability to BetaPay using its persisted revision; beta's synthetic transaction reference starts with `betapay-transaction-`, while alpha uses AlphaPay. This proves only this local synthetic routing scenario, not multi-host routing.

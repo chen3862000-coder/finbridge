@@ -59,23 +59,26 @@ class DemoIdentityFilterTest {
         when(memberships.findEnabled(ISSUER, "synthetic-subject")).thenReturn(Optional.of(
                 new DemoIdentityMembershipRepository.Membership("borrower", TENANT_ID, false)));
         var request = new MockHttpServletRequest();
+        request.getSession();
         var response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
 
         filter(memberships, contexts).invoke(request, response, chain);
 
+        assertEquals(1800, request.getSession(false).getMaxInactiveInterval());
         verify(contexts).saveContext(SecurityContextHolder.getContext(), request, response);
         verify(chain).doFilter(request, response);
     }
 
     private static ExposedFilter filter(DemoIdentityMembershipRepository memberships,
             SecurityContextRepository contexts) {
-        return new ExposedFilter(memberships, contexts);
+        return new ExposedFilter(memberships, contexts, java.time.Duration.ofMinutes(30));
     }
 
     private static final class ExposedFilter extends DemoIdentityFilter {
-        ExposedFilter(DemoIdentityMembershipRepository memberships, SecurityContextRepository contexts) {
-            super(memberships, contexts);
+        ExposedFilter(DemoIdentityMembershipRepository memberships, SecurityContextRepository contexts,
+                java.time.Duration timeout) {
+            super(memberships, contexts, timeout);
         }
 
         void invoke(MockHttpServletRequest request, MockHttpServletResponse response, FilterChain chain)

@@ -20,8 +20,8 @@ Under JDK 21, run:
 ./mvnw --batch-mode --no-transfer-progress -pl integration-tests -am test
 ```
 
-`ArchitectureBoundaryTest` should preserve dependency boundaries and `HostPackagingTest` should find no concrete provider/private-helper classes in the host artifact. Runtime external-JAR tests verify distinct private helper loaders and shared SPI identity. The root `clean verify` has passed the integration-tests module (3 tests). The M1 architecture doc records the original real-JAR evidence; a new screenshot was not captured.
+`ArchitectureBoundaryTest` preserves dependency boundaries and `HostPackagingTest` finds no concrete provider/private-helper classes in the host artifact. `PluginRuntimeIntegrationTest.loadsRealExternalPluginJarsWithSharedSpiAndPrivateDependencyIsolation` loads and invokes assembled AlphaPay v1/v2 JARs, proving separate private-helper loaders and shared SPI identity. The focused command `./mvnw --batch-mode --no-transfer-progress -pl integration-tests -am test` passed 3 integration-module tests with zero failures/errors/skips. This is machine-verifiable loader evidence; no screenshot is applicable.
 
 ## Verification Status
 
-The integration test loads and invokes real assembled JARs and checks helper defining loaders and shared SPI identity. A developer-facing walkthrough with direct commands and captured output is **not yet recorded**. Isolation is not a sandbox.
+Verified 2026-10-29 with `export JAVA_HOME="$(/usr/libexec/java_home -v 21)"; export PATH="$JAVA_HOME/bin:$PATH"; ./mvnw --batch-mode --no-transfer-progress -pl integration-tests -am test`: BUILD SUCCESS, 3 integration-module tests passed, including the real assembled AlphaPay v1/v2 class-loader test plus architecture and host-packaging tests. `PluginRuntimeIntegrationTest` passed all 6 runtime tests. This is a test-run walkthrough rather than a live browser view. Isolation is not a sandbox.

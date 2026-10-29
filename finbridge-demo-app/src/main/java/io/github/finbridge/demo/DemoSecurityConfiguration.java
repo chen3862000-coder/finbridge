@@ -57,8 +57,10 @@ public class DemoSecurityConfiguration {
 
     @Bean
     public DemoIdentityFilter demoIdentityFilter(DemoIdentityMembershipRepository memberships,
-            SecurityContextRepository contexts) {
-        return new DemoIdentityFilter(memberships, contexts);
+            SecurityContextRepository contexts,
+            @org.springframework.beans.factory.annotation.Value("${server.servlet.session.timeout:30m}")
+            java.time.Duration sessionTimeout) {
+        return new DemoIdentityFilter(memberships, contexts, sessionTimeout);
     }
 
     @Bean
@@ -81,9 +83,8 @@ public class DemoSecurityConfiguration {
                         .requestMatchers("/", "/borrower", "/console", "/src/**", "/@vite/**", "/@react-refresh",
                                 "/node_modules/**",
                                 "/assets/**", "/favicon.ico", "/actuator/health/**",
-                                "/api/csrf", "/oauth2/**", "/login/**", "/error").permitAll()
-                .requestMatchers("/api/session").authenticated()
-                        .requestMatchers("/api/console/**").hasRole("FINBRIDGE_AUTHENTICATED")
+                                "/api/session", "/api/csrf", "/oauth2/**", "/login/**", "/error").permitAll()
+                .requestMatchers("/api/console/**").hasRole("FINBRIDGE_AUTHENTICATED")
                         .requestMatchers("/api/borrower/**").hasRole("FINBRIDGE_AUTHENTICATED")
                         .requestMatchers("/api/admin/**").hasRole("FINBRIDGE_ADMIN")
                         .anyRequest().authenticated())

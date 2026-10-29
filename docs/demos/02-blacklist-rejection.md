@@ -6,7 +6,7 @@ Show that a normalized synthetic blacklist hit is a core-owned rejection and can
 
 ## Behavior Fixture
 
-`BlacklistYProvider` returns a synthetic hit when the synthetic applicant reference contains `blacklisted`. The demo API currently fixes the applicant reference to the authenticated `self` identity, so the public borrower E2E does not currently select this fixture from the browser. Do not add a caller-controlled applicant/tenant identity to reach it.
+`BlacklistYProvider` returns a synthetic hit when the server-generated synthetic applicant reference contains `blacklisted`. Sign in as `borrower-alpha-blacklist` / `alpha-blacklist-local-only`. Its issuer/subject mapping assigns that fixed applicant reference server-side. The borrower API does not accept an applicant, tenant, or scenario selector.
 
 ## Verification Command and Expected Result
 
@@ -16,7 +16,7 @@ Under JDK 21, run:
 ./mvnw --batch-mode --no-transfer-progress -pl finbridge-risk-gateway -am test
 ```
 
-`SyntheticRiskDecisionPolicyTest.blacklistAndCriticalFraudRejectBeforeScoreBand` should pass and report `REJECT` with `BLACKLIST_HIT`; the lending workflow tests verify rejection does not originate a loan/payment. The root `clean verify` has passed these tests. This is module-level evidence, not a separately executed HTTP walkthrough.
+`SyntheticRiskDecisionPolicyTest.blacklistAndCriticalFraudRejectBeforeScoreBand` reports `REJECT` with `BLACKLIST_HIT`; PostgreSQL workflow tests verify rejection does not originate a loan/payment. The live E2E additionally signs in as the dedicated blacklist fixture identity and verifies rejection through HTTP.
 
 ## Evidence
 
@@ -27,4 +27,4 @@ Under JDK 21, run:
 
 ## Verification Status
 
-The deterministic policy and workflow rules are covered at module level. A standalone live borrower HTTP walkthrough for this rejection is **not yet implemented or executed**. Do not report the seven-demo release requirement as complete on this basis.
+Verified 2026-10-29 with `export JAVA_HOME="$(/usr/libexec/java_home -v 21)"; export PATH="$JAVA_HOME/bin:$PATH"; ./mvnw --batch-mode --no-transfer-progress -pl finbridge-risk-gateway -am test`: BUILD SUCCESS, 14 tests passed in the Risk Data Gateway module and its dependency reactor. The live HTTP walkthrough was run against a freshly reset synthetic Compose database with `cd frontend && FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e`; its dedicated blacklist identity received `REJECT`/`REJECTED` and created no loan or payment. The script runs the complete demo suite, not only this scenario. This local synthetic path is not a real credit decision.

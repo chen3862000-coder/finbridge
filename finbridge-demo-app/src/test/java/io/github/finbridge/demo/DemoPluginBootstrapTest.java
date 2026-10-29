@@ -16,17 +16,31 @@ import io.github.finbridge.spi.PluginKey;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class DemoPluginBootstrapTest {
     private static final UUID TENANT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    @TempDir
+    private Path pluginDirectory;
 
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @BeforeEach
+    void createSyntheticFixtureFiles() throws Exception {
+        for (String fixture : List.of("alphapay-1.0.0-jar-with-dependencies.jar",
+                "creditscorex-1.0.0-jar-with-dependencies.jar", "blacklisty-1.0.0-jar-with-dependencies.jar")) {
+            Files.createFile(pluginDirectory.resolve(fixture));
+        }
     }
 
     @Test
@@ -36,7 +50,7 @@ class DemoPluginBootstrapTest {
         when(admin.tenants()).thenReturn(List.of(new PluginControlPlaneRepository.TenantSummary(TENANT_ID, "alpha")));
         when(admin.bindings(TENANT_ID)).thenReturn(List.of());
 
-        new DemoPluginBootstrap(admin).run(new DefaultApplicationArguments(new String[0]));
+        new DemoPluginBootstrap(admin, pluginDirectory).run(new DefaultApplicationArguments(new String[0]));
 
         verify(admin).install("alphapay-1.0.0-jar-with-dependencies.jar");
         verify(admin).activate(new PluginKey("alphapay", "1.0.0"));
@@ -44,7 +58,7 @@ class DemoPluginBootstrapTest {
         verify(admin).bind(TENANT_ID, Capability.QUERY_STATUS, new PluginKey("alphapay", "1.0.0"), 0);
         verify(admin).bind(TENANT_ID, Capability.CREDIT_SCORE, new PluginKey("creditscorex", "1.0.0"), 0);
         verify(admin).bind(TENANT_ID, Capability.BLACKLIST, new PluginKey("blacklisty", "1.0.0"), 0);
-        verify(admin).bind(TENANT_ID, Capability.FRAUD_SIGNAL, new PluginKey("fraudsignalz", "1.0.0"), 0);
+        verify(admin, never()).install("fraudsignalz-1.0.0-jar-with-dependencies.jar");
         assertNull(SecurityContextHolder.getContext().getAuthentication());
     }
 
@@ -59,7 +73,7 @@ class DemoPluginBootstrapTest {
         when(admin.tenants()).thenReturn(List.of(new PluginControlPlaneRepository.TenantSummary(TENANT_ID, "alpha")));
         when(admin.bindings(TENANT_ID)).thenReturn(activeBindings());
 
-        new DemoPluginBootstrap(admin).run(new DefaultApplicationArguments(new String[0]));
+        new DemoPluginBootstrap(admin, pluginDirectory).run(new DefaultApplicationArguments(new String[0]));
 
         verify(admin, never()).install(any());
         verify(admin, never()).activate(any());
@@ -70,8 +84,7 @@ class DemoPluginBootstrapTest {
         return List.of(
                 artifact("alphapay", Set.of(Capability.DISBURSE, Capability.QUERY_STATUS)),
                 artifact("creditscorex", Set.of(Capability.CREDIT_SCORE)),
-                artifact("blacklisty", Set.of(Capability.BLACKLIST)),
-                artifact("fraudsignalz", Set.of(Capability.FRAUD_SIGNAL)));
+                artifact("blacklisty", Set.of(Capability.BLACKLIST)));
     }
 
     private static PluginControlPlaneRepository.RegisteredArtifact artifact(
@@ -86,7 +99,6 @@ class DemoPluginBootstrapTest {
                 new PluginBinding(TENANT_ID, Capability.DISBURSE, new PluginKey("alphapay", "1.0.0"), 1),
                 new PluginBinding(TENANT_ID, Capability.QUERY_STATUS, new PluginKey("alphapay", "1.0.0"), 1),
                 new PluginBinding(TENANT_ID, Capability.CREDIT_SCORE, new PluginKey("creditscorex", "1.0.0"), 1),
-                new PluginBinding(TENANT_ID, Capability.BLACKLIST, new PluginKey("blacklisty", "1.0.0"), 1),
-                new PluginBinding(TENANT_ID, Capability.FRAUD_SIGNAL, new PluginKey("fraudsignalz", "1.0.0"), 1));
+                new PluginBinding(TENANT_ID, Capability.BLACKLIST, new PluginKey("blacklisty", "1.0.0"), 1));
     }
 }

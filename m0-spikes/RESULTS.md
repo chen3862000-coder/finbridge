@@ -5,21 +5,20 @@
 
 ## Toolchain
 
-- JDK: Microsoft OpenJDK 21.0.12.1 (arm64)
+- JDK: OpenJDK 21.0.12.1
 - Maven Wrapper: 3.9.11 (`only-script` distribution)
 - Spring Boot: 3.5.16
-- Platform: macOS 26.6.2, Apple Silicon
 - Java enforcement: Maven Enforcer `requireJavaVersion` `[21,22)`
 
 Commands executed:
 
 ```bash
-JAVA_HOME="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home" \
-PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home/bin:$PATH" \
+JAVA_HOME="${JAVA_21_HOME:?Set JAVA_21_HOME to a JDK 21 installation}" \
+PATH="$JAVA_21_HOME/bin:$PATH" \
 ./mvnw -version
 
-JAVA_HOME="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home" \
-PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home/bin:$PATH" \
+JAVA_HOME="${JAVA_21_HOME:?Set JAVA_21_HOME to a JDK 21 installation}" \
+PATH="$JAVA_21_HOME/bin:$PATH" \
 ./mvnw -f m0-spikes/build/pom.xml clean package
 ```
 
@@ -30,8 +29,8 @@ PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Hom
 Command:
 
 ```bash
-JAVA_HOME="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home" \
-PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home/bin:$PATH" \
+JAVA_HOME="${JAVA_21_HOME:?Set JAVA_21_HOME to a JDK 21 installation}" \
+PATH="$JAVA_21_HOME/bin:$PATH" \
 bash m0-spikes/classloader/run.sh
 ```
 
@@ -55,8 +54,8 @@ Assertions passed: each external JAR was discovered using `ServiceLoader`; each 
 Command:
 
 ```bash
-JAVA_HOME="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home" \
-PATH="/Users/spiderck/Library/Java/JavaVirtualMachines/ms-21.0.12.1/Contents/Home/bin:$PATH" \
+JAVA_HOME="${JAVA_21_HOME:?Set JAVA_21_HOME to a JDK 21 installation}" \
+PATH="$JAVA_21_HOME/bin:$PATH" \
 bash m0-spikes/repayment/run.sh
 ```
 

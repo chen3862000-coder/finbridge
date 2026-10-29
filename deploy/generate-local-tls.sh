@@ -7,6 +7,9 @@ openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 30 \
   -keyout "$TLS_DIR/localhost.key" -out "$TLS_DIR/localhost.crt" \
   -subj "/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+keytool -delete -noprompt -alias finbridge-localhost \
+  -keystore "$TLS_DIR/truststore.p12" -storetype PKCS12 -storepass changeit \
+  >/dev/null 2>&1 || true
 keytool -importcert -noprompt -alias finbridge-localhost \
   -file "$TLS_DIR/localhost.crt" -keystore "$TLS_DIR/truststore.p12" \
   -storetype PKCS12 -storepass changeit

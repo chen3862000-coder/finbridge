@@ -185,6 +185,7 @@ class HostAuthorizationTest {
         assertEquals("demo-borrower-a-self", command.getValue().applicantId());
         assertEquals(List.of(), facade.listApplicationsForCurrentTenant(10));
         verify(applications).listApplications(tenant, 10);
+
     }
 
     @Test

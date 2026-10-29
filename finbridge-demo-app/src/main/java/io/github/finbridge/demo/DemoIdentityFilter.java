@@ -15,12 +15,16 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class DemoIdentityFilter extends OncePerRequestFilter {
     private final DemoIdentityMembershipRepository memberships;
     private final SecurityContextRepository contexts;
+    private final int sessionTimeoutSeconds;
 
     public DemoIdentityFilter(DemoIdentityMembershipRepository memberships,
-            SecurityContextRepository contexts) {
+            SecurityContextRepository contexts,
+            @org.springframework.beans.factory.annotation.Value("${server.servlet.session.timeout:30m}")
+            java.time.Duration sessionTimeout) {
         super();
         this.memberships = memberships;
         this.contexts = contexts;
+        this.sessionTimeoutSeconds = Math.toIntExact(sessionTimeout.toSeconds());
     }
 
     @Override
@@ -48,6 +52,10 @@ public class DemoIdentityFilter extends OncePerRequestFilter {
             DemoIdentityMembershipRepository.MembershipKey key,
             java.util.Collection<? extends org.springframework.security.core.GrantedAuthority> authorities,
             HttpServletRequest request, HttpServletResponse response) throws IOException {
+        var session = request.getSession(false);
+        if (session != null) {
+            session.setMaxInactiveInterval(sessionTimeoutSeconds);
+        }
         var membership = memberships.findEnabled(key.issuer(), key.subject());
         if (membership.isEmpty() || !membership.orElseThrow().principalSubject().equals(principal.subject())
                 || !java.util.Objects.equals(membership.orElseThrow().tenantId(), principal.tenantId())

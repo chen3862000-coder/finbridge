@@ -5,6 +5,8 @@ import io.github.finbridge.host.PluginAdminFacade;
 import io.github.finbridge.host.PluginControlPlaneRepository;
 import io.github.finbridge.spi.Capability;
 import io.github.finbridge.spi.PluginKey;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -26,14 +28,16 @@ public class DemoPluginBootstrap implements ApplicationRunner {
             new ArtifactBinding("creditscorex-1.0.0-jar-with-dependencies.jar",
                     new PluginKey("creditscorex", "1.0.0"), List.of(Capability.CREDIT_SCORE)),
             new ArtifactBinding("blacklisty-1.0.0-jar-with-dependencies.jar",
-                    new PluginKey("blacklisty", "1.0.0"), List.of(Capability.BLACKLIST)),
-            new ArtifactBinding("fraudsignalz-1.0.0-jar-with-dependencies.jar",
-                    new PluginKey("fraudsignalz", "1.0.0"), List.of(Capability.FRAUD_SIGNAL)));
+                    new PluginKey("blacklisty", "1.0.0"), List.of(Capability.BLACKLIST)));
 
     private final PluginAdminFacade admin;
+    private final Path pluginDirectory;
 
-    public DemoPluginBootstrap(PluginAdminFacade admin) {
+    public DemoPluginBootstrap(PluginAdminFacade admin,
+            @org.springframework.beans.factory.annotation.Value("${finbridge.plugin-directory:plugins}")
+            Path pluginDirectory) {
         this.admin = admin;
+        this.pluginDirectory = pluginDirectory;
     }
 
     @Override
@@ -44,6 +48,7 @@ public class DemoPluginBootstrap implements ApplicationRunner {
                 List.of(new SimpleGrantedAuthority("ROLE_FINBRIDGE_ADMIN"))));
         SecurityContextHolder.setContext(context);
         try {
+            installAvailableFixtures();
             registerFixtures();
             bindFixtures();
         } finally {
@@ -51,13 +56,21 @@ public class DemoPluginBootstrap implements ApplicationRunner {
         }
     }
 
-    private void registerFixtures() {
+    private void installAvailableFixtures() {
         for (ArtifactBinding fixture : FIXTURES) {
+            if (!Files.isRegularFile(pluginDirectory.resolve(fixture.artifactName()))) {
+                continue;
+            }
             PluginControlPlaneRepository.RegisteredArtifact artifact = findArtifact(fixture.key());
             if (artifact == null) {
                 admin.install(fixture.artifactName());
-                artifact = findArtifact(fixture.key());
             }
+        }
+    }
+
+    private void registerFixtures() {
+        for (ArtifactBinding fixture : FIXTURES) {
+            PluginControlPlaneRepository.RegisteredArtifact artifact = findArtifact(fixture.key());
             if (artifact != null && !"ACTIVE".equals(artifact.desiredState())) {
                 admin.activate(fixture.key());
             }
@@ -68,6 +81,9 @@ public class DemoPluginBootstrap implements ApplicationRunner {
         for (var tenant : admin.tenants()) {
             List<io.github.finbridge.runtime.PluginBinding> bindings = admin.bindings(tenant.tenantId());
             for (ArtifactBinding fixture : FIXTURES) {
+                if (findArtifact(fixture.key()) == null) {
+                    continue;
+                }
                 for (Capability capability : fixture.capabilities()) {
                     boolean exists = bindings.stream().anyMatch(binding -> binding.capability() == capability);
                     if (!exists) {

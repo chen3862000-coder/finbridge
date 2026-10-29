@@ -10,8 +10,7 @@ RUN mkdir -p /plugin-dist && \
     cp plugins/blacklisty/target/blacklisty-*-jar-with-dependencies.jar /plugin-dist/blacklisty-1.0.0-jar-with-dependencies.jar && \
     cp plugins/fraudsignalz/target/fraudsignalz-*-jar-with-dependencies.jar /plugin-dist/fraudsignalz-1.0.0-jar-with-dependencies.jar
 
-FROM eclipse-temurin:21.0.8_9-jre-alpine
-RUN apk add --no-cache wget
+FROM maven:3.9.11-eclipse-temurin-21
 WORKDIR /app
 COPY --from=build /workspace/finbridge-demo-app/target/finbridge-demo-app-0.1.0-SNAPSHOT.jar /app/demo.jar
 COPY --from=build /plugin-dist/ /app/plugins/

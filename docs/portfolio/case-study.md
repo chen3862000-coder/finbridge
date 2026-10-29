@@ -18,13 +18,14 @@ Provider integrations often entangle core decision logic, runtime dependencies, 
 
 ## Evidence
 
-- Root JDK 21 `./mvnw --batch-mode --no-transfer-progress clean verify`: 17 modules passed; 257 tests, 0 failures/errors/skips; Enforcer, PMD, SpotBugs, and JaCoCo passed.
+- Root JDK 21 `./mvnw --batch-mode --no-transfer-progress clean verify`: 17 modules passed; 261 tests, 0 failures/errors/skips; Enforcer, PMD, SpotBugs, and JaCoCo passed.
 - Frontend `npm run build` passed; `npm test` passed 4 tests; `npm audit --omit=dev` reported zero production dependency vulnerabilities. `npm ci` reported 3 full-tree vulnerabilities, including development dependencies.
 - Fresh local Compose stack started with healthy PostgreSQL, Keycloak, and API services. The Console returned HTTP 200 on the local HTTPS route.
-- Authenticated local HTTP E2E passed application/risk, origination, repayment plan, synthetic disbursement/status/reconciliation, cross-tenant denial, and borrower/admin route separation.
+- Authenticated local HTTP E2E passed application/risk (APPROVE, REVIEW, BLACKLIST rejection, critical-fraud rejection), origination, repayment plan, synthetic disbursement/status/reconciliation, BetaPay routing for the beta tenant, runtime FraudSignalZ install/binding, AlphaPay v1/v2 binding rollback, cookie/CSRF logout, spoofed tenant-value rejection, cross-tenant denial, and borrower/admin route separation.
+- Captured anonymous borrower entry screenshot: `screenshots/borrower-demo.png`. No signed-in borrower or admin screenshot is included.
 
 See `docs/quality/architecture-review-checklist.md` for requirement traceability, exact verification records, and remaining gaps. See `docs/adr/ADR-014-authenticated-borrower-demo-api.md` for the local identity boundary.
 
 ## Explicit Limitations
 
-This is not a production lending or identity system. Risk decisions and provider effects are synthetic. Keycloak, seeded passwords, the self-signed certificate, and the E2E TLS verification bypass are local-only. Plugin class-loader isolation is not sandboxing. The host runtime, binding publication, recovery, and sessions are single-host. The local demo has not completed negative OIDC token callback testing, production threat modeling, clean-clone verification, screenshots, or the full seven-demo release evidence set. No performance, financial, underwriting, settlement, or compliance metrics are claimed.
+This is not a production lending or identity system. Risk decisions and provider effects are synthetic. Keycloak, seeded passwords, the self-signed certificate, and the E2E TLS verification bypass are local-only. Plugin class-loader isolation is not sandboxing. The host runtime, binding publication, recovery, and sessions are single-host. Clean-worktree Java/frontend/Compose/API verification is complete, including the seven documented walkthroughs and an anonymous entry screenshot. Remaining identity evidence is limited to not having exercised each malformed/expired/wrong-claim ID token through a live Keycloak callback; the production OIDC decoder rejects signed synthetic cases in focused tests. Production threat modeling and production identity/security review remain out of scope. No performance, financial, underwriting, settlement, or compliance metrics are claimed.

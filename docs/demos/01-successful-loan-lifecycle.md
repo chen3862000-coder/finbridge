@@ -23,6 +23,7 @@ The live script submits exact decimal text `1234.56`, receives a synthetic `APPR
 - Service tests: `RiskAssessmentServiceTest`, `LoanOriginationServiceTest`, `DisbursementServiceTest`
 - Related design: ADR-007, ADR-009, ADR-010, ADR-012, ADR-014
 - Actual run recorded: M7 Demo Review Record in `docs/quality/architecture-review-checklist.md`
+- Anonymous entry screenshot: `../portfolio/screenshots/borrower-demo.png`
 
 ## Limits
 
