@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 
+/** Builds draft repayment plans; activation and due-date assignment follow confirmed disbursement. */
 @Service
 public class RepaymentPlanService {
     private final RepaymentScheduleCalculator calculator;
@@ -16,6 +17,7 @@ public class RepaymentPlanService {
         this.calculator = calculator;
     }
 
+    /** Generates a pending plan for the supplied loan without assigning due dates. */
     public RepaymentPlan generateDraft(Loan loan) {
         Objects.requireNonNull(loan, "loan");
         UUID planId = UUID.randomUUID();

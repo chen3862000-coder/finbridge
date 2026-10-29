@@ -26,6 +26,7 @@
         <jacoco.version>0.8.15</jacoco.version>
         <maven.enforcer.plugin.version>3.5.0</maven.enforcer.plugin.version>
         <quality.coverage.minimum>0.71</quality.coverage.minimum>
+        <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
     </properties>
 
     <!-- Provider implementations are separate distribution artifacts, never host dependencies. -->

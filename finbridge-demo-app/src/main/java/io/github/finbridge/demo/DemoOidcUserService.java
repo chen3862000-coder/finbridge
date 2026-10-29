@@ -8,6 +8,7 @@ import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 
+/** Maps a validated local-demo OIDC identity to an enabled server-owned tenant membership. */
 class DemoOidcUserService extends OidcUserService {
     private final DemoIdentityMembershipRepository memberships;
     private final Environment environment;
@@ -21,6 +22,7 @@ class DemoOidcUserService extends OidcUserService {
         this.delegate = delegate;
     }
 
+    /** Rejects issuer mismatches and unmapped identities before creating a FinBridge principal. */
     @Override
     public OidcUser loadUser(OidcUserRequest request) {
         OidcUser user = delegate.loadUser(request);

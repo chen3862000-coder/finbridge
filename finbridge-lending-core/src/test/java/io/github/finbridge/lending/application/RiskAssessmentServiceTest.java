@@ -79,6 +79,51 @@ class RiskAssessmentServiceTest {
     }
 
     @Test
+    void persistsManualReviewWhenMandatoryProvidersHaveNoNormalizedEvidence() {
+        UUID tenant = UUID.randomUUID();
+        LoanApplication application = application(tenant, ApplicationStatus.SUBMITTED, 0);
+        OriginationWorkflow running = workflow(tenant, application.applicationId(), 0);
+        LendingApplicationService applications = mock(LendingApplicationService.class);
+        OriginationWorkflowRepository workflows = mock(OriginationWorkflowRepository.class);
+        RiskAssessmentRepository assessments = mock(RiskAssessmentRepository.class);
+        RiskDataGateway gateway = mock(RiskDataGateway.class);
+        when(applications.getApplication(tenant, application.applicationId())).thenReturn(application);
+        when(workflows.findByApplication(tenant, application.applicationId())).thenReturn(Optional.empty());
+        when(workflows.startRisk(tenant, application.applicationId(), NOW)).thenReturn(running);
+        for (RiskDataType type : RiskDataType.values()) {
+            when(gateway.query(org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.eq(type),
+                    org.mockito.ArgumentMatchers.any(RiskDataRequest.class),
+                    org.mockito.ArgumentMatchers.any(OperationContext.class)))
+                    .thenReturn(RiskProviderOutcome.failure(UUID.randomUUID(), null, "CAPABILITY_UNAVAILABLE",
+                            Duration.ZERO));
+        }
+        when(assessments.claimAssessment(org.mockito.ArgumentMatchers.eq(tenant),
+                org.mockito.ArgumentMatchers.eq(application.applicationId()),
+                org.mockito.ArgumentMatchers.eq(running.activeAssessmentId()),
+                org.mockito.ArgumentMatchers.eq(running.workflowId()),
+                org.mockito.ArgumentMatchers.eq(running.activeRiskAttemptId()),
+                org.mockito.ArgumentMatchers.eq(running.version()),
+                org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> new RiskAssessmentRepository.RiskAssessmentClaim(
+                        pending(application, invocation.getArgument(2)), false));
+        when(assessments.completeAndRecord(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(AssessmentDecision.REVIEW),
+                org.mockito.ArgumentMatchers.eq(running.activeRiskAttemptId()), org.mockito.ArgumentMatchers.eq(0L),
+                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        RiskAssessment assessment = service(applications, workflows, assessments, gateway)
+                .evaluate(tenant, application.applicationId(), "corr-unavailable");
+
+        assertEquals(AssessmentStatus.COMPLETED, assessment.status());
+        assertEquals(AssessmentDecision.REVIEW, assessment.decision());
+        assertEquals(List.of("MANDATORY_RISK_DATA_UNAVAILABLE"), assessment.reasonCodes());
+        assertEquals(null, assessment.creditScore());
+        assertEquals(null, assessment.blacklistHit());
+        assertEquals(null, assessment.fraudSignal());
+    }
+
+    @Test
     void retryResumesRiskStepAndReturnsPersistedCompletedAssessmentWithoutProviderCalls() {
         UUID tenant = UUID.randomUUID();
         LoanApplication application = application(tenant, ApplicationStatus.RISK_EVALUATING, 1);

@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
+/** Persists payment ownership before provider effects and activates loans only after confirmed success. */
 @Service
 public class DisbursementService {
     private static final String OPERATION = "DISBURSE";
@@ -45,6 +46,10 @@ public class DisbursementService {
         this.clock = clock;
     }
 
+    /**
+     * Claims an idempotent disbursement and dispatches it to the pinned provider owner.
+     * An ambiguous provider result remains unresolved for reconciliation; it is never blindly resubmitted.
+     */
     public DisbursementClaim dispatch(UUID tenantId, UUID loanId, String idempotencyKey,
             String correlationId) {
         requireRequest(tenantId, loanId, idempotencyKey, correlationId);
@@ -68,6 +73,7 @@ public class DisbursementService {
         return persistOutcome(tenantId, claim, outcome, now);
     }
 
+    /** Queries the original payment owner and persists its status without changing provider ownership. */
     public DisbursementClaim reconcile(UUID tenantId, UUID loanId, String correlationId) {
         Objects.requireNonNull(tenantId, "tenantId");
         Objects.requireNonNull(loanId, "loanId");
@@ -102,10 +108,12 @@ public class DisbursementService {
         return persistOutcome(tenantId, claim, outcome, now);
     }
 
+    /** Returns the persisted disbursement status for a tenant-owned loan. */
     public DisbursementClaim getStatus(UUID tenantId, UUID loanId) {
         return origination.getDisbursement(tenantId, loanId);
     }
 
+    /** Reconciles unresolved payments after restart and records when an owner is unavailable. */
     public int recoverUnresolvedPayments() {
         int recovered = 0;
         for (PaymentTransaction transaction : aggregates.findUnresolvedPaymentTransactions()) {

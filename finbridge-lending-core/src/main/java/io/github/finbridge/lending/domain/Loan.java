@@ -6,6 +6,7 @@ import java.util.Currency;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Loan aggregate whose active state requires a confirmed, transaction-owned disbursement. */
 public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal principal,
                    Currency currency, BigDecimal annualInterestRatePercent, int termMonths,
                    String productCode, int productVersion, LoanStatus status,
@@ -31,6 +32,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         }
     }
 
+    /** Moves an eligible pending loan to processing for its persisted payment intent. */
     public Loan markDisbursementProcessing(UUID transactionId) {
         if (status != LoanStatus.PENDING_DISBURSEMENT) {
             throw new IllegalStateException("Loan is not awaiting disbursement");
@@ -38,6 +40,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return copy(LoanStatus.DISBURSEMENT_PROCESSING, transactionId, null, null);
     }
 
+    /** Activates a processing loan after its owned payment has been confirmed successful. */
     public Loan activateAfterConfirmedDisbursement(Instant confirmedAt) {
         Objects.requireNonNull(confirmedAt, "confirmedAt");
         if (status != LoanStatus.DISBURSEMENT_PROCESSING || disbursementTransactionId == null) {
@@ -46,6 +49,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return copy(LoanStatus.ACTIVE, disbursementTransactionId, confirmedAt, confirmedAt);
     }
 
+    /** Records the first durable payment intent before an external provider call. */
     public Loan recordPaymentIntent(UUID transactionId) {
         Objects.requireNonNull(transactionId, "transactionId");
         if (status != LoanStatus.PENDING_DISBURSEMENT) {
@@ -54,6 +58,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return copy(LoanStatus.DISBURSEMENT_PROCESSING, transactionId, null, null);
     }
 
+    /** Records a definitive failure for the current payment intent without activating the loan. */
     public Loan recordDisbursementFailure() {
         if (status != LoanStatus.DISBURSEMENT_PROCESSING || disbursementTransactionId == null) {
             throw new IllegalStateException("Loan has no active disbursement intent");
@@ -61,6 +66,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return copy(LoanStatus.DISBURSEMENT_FAILED, disbursementTransactionId, null, null);
     }
 
+    /** Confirms payment only when the transaction ID matches this loan's persisted intent. */
     public Loan confirmDisbursement(UUID transactionId, Instant confirmedAt) {
         Objects.requireNonNull(transactionId, "transactionId");
         Objects.requireNonNull(confirmedAt, "confirmedAt");
@@ -74,6 +80,7 @@ public record Loan(UUID loanId, UUID applicationId, UUID tenantId, BigDecimal pr
         return activateAfterConfirmedDisbursement(confirmedAt);
     }
 
+    /** Marks a pending or processing loan failed; this never represents an ambiguous outcome. */
     public Loan markDisbursementFailed() {
         if (status != LoanStatus.PENDING_DISBURSEMENT
                 && status != LoanStatus.DISBURSEMENT_PROCESSING) {

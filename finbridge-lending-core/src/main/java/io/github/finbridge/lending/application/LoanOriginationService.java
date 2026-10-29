@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
+/** Creates one pending loan and repayment plan atomically for an approved application. */
 @Service
 public class LoanOriginationService {
     private final ApplicationLookupBoundary applications;
@@ -36,6 +37,10 @@ public class LoanOriginationService {
         this.clock = clock;
     }
 
+    /**
+     * Originates an approved application within its tenant; repeated calls return the existing loan.
+     * The loan and plan remain pending until confirmed disbursement.
+     */
     public Loan originate(UUID tenantId, UUID applicationId) {
         LoanApplication application = applications.find(tenantId, applicationId)
                 .orElseThrow(() -> new LendingCoreException("Loan application was not found"));
@@ -65,15 +70,18 @@ public class LoanOriginationService {
         return aggregates.originateApproved(loan, plan);
     }
 
+    /** Returns a loan only within the supplied tenant. */
     public Loan getLoan(UUID tenantId, UUID loanId) {
         return aggregates.findLoan(tenantId, loanId)
                 .orElseThrow(() -> new LendingCoreException("Loan was not found"));
     }
 
+    /** Lists recent loans for one tenant. */
     public List<Loan> listLoans(UUID tenantId, int limit) {
         return aggregates.findRecentLoans(tenantId, limit);
     }
 
+    /** Returns the persisted disbursement state for a tenant-owned loan. */
     public LendingAggregateRepository.DisbursementClaim getDisbursement(UUID tenantId, UUID loanId) {
         return aggregates.findDisbursement(tenantId, loanId)
                 .orElseThrow(() -> new LendingCoreException("Disbursement was not found"));

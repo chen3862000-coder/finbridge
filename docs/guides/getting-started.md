@@ -26,7 +26,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Open `https://localhost:8443/borrower` after trusting `deploy/tls/localhost.crt` in the local machine/browser. See the [README local demo section](../../README.md#authenticated-local-demo) for synthetic demo accounts and environment configuration. These credentials and generated certificates are local-only.
+Open `https://localhost:8443/borrower` after trusting `deploy/tls/localhost.crt` in the local machine/browser. See the [README quick start](../../README.md#quick-start) and [borrower demo guide](borrower-demo-usage.md) for synthetic demo accounts and environment configuration. These credentials and generated certificates are local-only.
 
 ## Run Live HTTP E2E
 

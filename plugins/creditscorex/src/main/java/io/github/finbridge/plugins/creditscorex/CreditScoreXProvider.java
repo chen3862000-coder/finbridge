@@ -29,7 +29,8 @@ public final class CreditScoreXProvider implements RiskDataProvider {
     @Override
     public RiskDataResult query(RiskDataRequest request, OperationContext context) {
         String applicant = request.syntheticApplicantId();
-        int score = applicant.contains("low-score") ? 550 : applicant.contains("review-score") ? 640 : 720;
+        int score = applicant.contains("low-score") ? 550
+                : applicant.contains("review-score") || applicant.contains("review") ? 640 : 720;
         return RiskDataResult.available(new CreditScoreValue(score));
     }
 }

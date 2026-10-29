@@ -10,7 +10,7 @@ Lifecycle operations affect future routing. Existing payment transactions retain
 
 Use the admin Console/API against a runnable host with a trusted admin principal. An upgrade installs and validates a candidate, activates it, commits a future binding revision, publishes that revision, and drains the old artifact only after it is no longer referenced. Rollback restores a previously registered artifact and publishes a new revision; it does not rewrite historical payment ownership.
 
-The runnable local demo bootstrap is a fixture installer, not an operator control-plane replacement. It is opt-in and enabled by Compose only. It registers synthetic artifacts and tenant bindings from the image's `/app/plugins` directory.
+The runnable local demo bootstrap is a fixture installer, not an operator control-plane replacement. It defaults off in `application.yml` and is enabled by the supplied Compose configuration. `DemoPluginBootstrap` contains the exact default artifact/capability fixture list. It installs available fixture JARs from `/app/plugins`, activates them, and creates a binding only when the tenant does not already have that capability bound. Existing routes are not overwritten. Other JARs packaged in the image are available for admin lifecycle demonstrations but are not automatically bound. The [Borrower Demo Usage guide](borrower-demo-usage.md#demo-tenant-capability-bindings) lists the mappings and explains how to inspect the effective persisted routes.
 
 ## Restart and Artifact Changes
 

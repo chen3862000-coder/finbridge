@@ -48,8 +48,8 @@ class BorrowerApiControllerTest {
         var risk = new RiskAssessment(UUID.randomUUID(), APPLICATION_ID, application.tenantId(),
                 AssessmentStatus.COMPLETED, 780, null, null, AssessmentDecision.APPROVE,
                 List.of("SYNTHETIC_APPROVAL"), List.of(), "synthetic-v1", NOW, NOW);
-        when(lending.listApplicationsForCurrentTenant(100)).thenReturn(List.of(application));
-        when(lending.application(APPLICATION_ID)).thenReturn(application);
+        when(lending.listApplicationsForCurrentBorrower(100)).thenReturn(List.of(application));
+        when(lending.borrowerApplication(APPLICATION_ID)).thenReturn(application);
         when(lending.assessments(APPLICATION_ID)).thenReturn(List.of(risk));
         when(lending.loanForApplication(APPLICATION_ID)).thenReturn(Optional.empty());
         when(lending.workflow(APPLICATION_ID)).thenReturn(null);
@@ -61,7 +61,8 @@ class BorrowerApiControllerTest {
         assertEquals("1200.00", status.application().requestedAmount().toPlainString());
         assertEquals("APPROVE", ((BorrowerApiController.RiskStatus) status.assessments().getFirst()).decision());
         assertNull(status.loan());
-        verify(lending).application(APPLICATION_ID);
+        verify(lending).borrowerApplication(APPLICATION_ID);
+        verify(lending).listApplicationsForCurrentBorrower(100);
     }
 
     @Test
@@ -69,7 +70,7 @@ class BorrowerApiControllerTest {
         var request = new BorrowerApiController.ApplicationRequest(
                 "CASH_LOAN_DEMO", new BigDecimal("1200.00"), "CNY", 3);
         var application = application();
-        when(lending.evaluate(APPLICATION_ID, "risk-correlation")).thenReturn(new RiskAssessment(
+        when(lending.evaluateForCurrentBorrower(APPLICATION_ID, "risk-correlation")).thenReturn(new RiskAssessment(
                 UUID.randomUUID(), APPLICATION_ID, application.tenantId(), AssessmentStatus.COMPLETED,
                 null, true, null, AssessmentDecision.REJECT, List.of("SYNTHETIC_REJECT"), List.of(),
                 "synthetic-v1", NOW, NOW));
@@ -78,6 +79,13 @@ class BorrowerApiControllerTest {
         controller.apply(request, "application-key");
         controller.applicationLoan(APPLICATION_ID);
         controller.evaluate(APPLICATION_ID, "risk-correlation");
+        when(lending.originateForCurrentBorrower(APPLICATION_ID)).thenReturn(null);
+        when(lending.borrowerLoan(LOAN_ID)).thenReturn(null);
+        when(lending.borrowerRepaymentPlan(LOAN_ID)).thenReturn(null);
+        when(lending.borrowerPaymentIfPresent(LOAN_ID)).thenReturn(Optional.empty());
+        when(lending.dispatchForCurrentBorrower(LOAN_ID, "payment-key", "payment-correlation"))
+                .thenReturn(null);
+        when(lending.reconcileForCurrentBorrower(LOAN_ID, "reconcile-correlation")).thenReturn(null);
         controller.originate(APPLICATION_ID);
         controller.loan(LOAN_ID);
         controller.repaymentPlan(LOAN_ID);
@@ -87,13 +95,13 @@ class BorrowerApiControllerTest {
 
         verify(lending).applyForCurrentTenant("self", "CASH_LOAN_DEMO", new BigDecimal("1200.00"),
                 Currency.getInstance("CNY"), 3, "application-key");
-        verify(lending).evaluate(APPLICATION_ID, "risk-correlation");
-        verify(lending).dispatch(LOAN_ID, "payment-key", "payment-correlation");
-        verify(lending).reconcile(LOAN_ID, "reconcile-correlation");
-        verify(lending).originate(APPLICATION_ID);
-        verify(lending).loan(LOAN_ID);
-        verify(lending).repaymentPlan(LOAN_ID);
-        verify(lending).paymentIfPresent(LOAN_ID);
+        verify(lending).evaluateForCurrentBorrower(APPLICATION_ID, "risk-correlation");
+        verify(lending).dispatchForCurrentBorrower(LOAN_ID, "payment-key", "payment-correlation");
+        verify(lending).reconcileForCurrentBorrower(LOAN_ID, "reconcile-correlation");
+        verify(lending).originateForCurrentBorrower(APPLICATION_ID);
+        verify(lending).borrowerLoan(LOAN_ID);
+        verify(lending).borrowerRepaymentPlan(LOAN_ID);
+        verify(lending).borrowerPaymentIfPresent(LOAN_ID);
         verify(lending).loanForApplication(APPLICATION_ID);
     }
 

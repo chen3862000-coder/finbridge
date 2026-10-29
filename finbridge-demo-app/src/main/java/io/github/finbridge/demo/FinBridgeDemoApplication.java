@@ -23,10 +23,10 @@ public class FinBridgeDemoApplication {
             memberships.assignDemoMembership(issuer, "10000000-0000-0000-0000-000000000003",
                     "demo-admin", null, true);
             memberships.assignDemoMembership(issuer, "10000000-0000-0000-0000-000000000004",
-                    "borrower-alpha-review-score", java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                    "borrower-alpha-review", java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
                     false);
             memberships.assignDemoMembership(issuer, "10000000-0000-0000-0000-000000000005",
-                    "borrower-alpha-blacklisted", java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                    "borrower-alpha-blacklist", java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
                     false);
             memberships.assignDemoMembership(issuer, "10000000-0000-0000-0000-000000000006",
                     "borrower-alpha-critical-fraud",

@@ -53,6 +53,8 @@ export function App() {
   if (window.location.pathname === "/borrower") return <BorrowerPage />;
   const [section, setSection] = useState<Section>("dashboard");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<string | null>(null);
   const [selectedLoan, setSelectedLoan] = useState<string | null>(null);
   const [toast, setToast] = useState("");
@@ -60,13 +62,20 @@ export function App() {
 
   useEffect(() => {
     void fetch("/api/session").then(response => response.ok ? response.json() : null)
-      .then(value => setIsAdmin(Boolean(value?.administrator))).catch(() => setIsAdmin(false));
+      .then(value => {
+        setAuthenticated(Boolean(value?.authenticated));
+        setIsAdmin(Boolean(value?.administrator));
+      }).catch(() => { setAuthenticated(false); setIsAdmin(false); })
+      .finally(() => setSessionChecked(true));
   }, []);
 
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 4200);
   };
+
+  if (!sessionChecked) return <main className="signed-out-shell"><div className="loading"><span className="spinner" /> Checking session…</div></main>;
+  if (!authenticated) return <SignedOutPage />;
 
   return <div className="console-shell">
     <aside className="sidebar">
@@ -86,18 +95,21 @@ export function App() {
       </nav>
       <div className="sidebar-bottom">
         <div className="environment"><span className="environment-dot" />SINGLE-HOST DEMO</div>
-        <ConsoleIdentity />
       </div>
     </aside>
 
     <main className="main-area">
       <header className="topbar">
         <div className="crumb"><span>FinBridge</span><span className="slash">/</span><b>{selectedApplication ? "Application record" : selectedLoan ? "Loan record" : title}</b></div>
-        <div className="top-actions"><span className="clock-label">CONTROL PLANE <i /></span><button className="icon-button" aria-label="Refresh" onClick={() => window.location.reload()}>↻</button><button className="help-button">?</button></div>
+        <div className="top-actions">
+          <div className="top-identity"><ConsoleIdentity /></div>
+        </div>
       </header>
       <div className="content">
         {selectedApplication
-          ? <ApplicationRecord id={selectedApplication} onBack={() => setSelectedApplication(null)} notify={notify} />
+          ? <ApplicationRecord id={selectedApplication} onBack={() => setSelectedApplication(null)}
+            onInspectLoan={loanId => { setSelectedApplication(null); setSection("loans"); setSelectedLoan(loanId); }}
+            notify={notify} />
           : selectedLoan
             ? <LoanRecord id={selectedLoan} onBack={() => setSelectedLoan(null)} notify={notify} />
             : <>
@@ -117,6 +129,16 @@ export function App() {
   </div>;
 }
 
+function SignedOutPage() {
+  return <main className="signed-out-shell"><section className="signed-out-card">
+    <span className="brand-mark"><i /><i /><i /></span>
+    <div className="kicker">FINBRIDGE INTERNAL CONSOLE</div>
+    <h1>Sign in to continue</h1>
+    <p>Your session has ended. Sign in again to view persisted lending and workflow data.</p>
+    <a className="button primary" href="/oauth2/authorization/finbridge">Sign in</a>
+  </section></main>;
+}
+
 function ConsoleIdentity() {
   const [session, setSession] = useState<{ subject: string; administrator: boolean } | null>(null);
   useEffect(() => {
@@ -131,7 +153,7 @@ function ConsoleIdentity() {
   return <div className="principal"><div className="avatar">{session?.administrator ? "AD" : "TN"}</div>
     <div><b>{session?.subject ?? "Sign-in required"}</b>
       <span>{session?.administrator ? "FinBridge administrator" : "Mapped tenant identity"}</span></div>
-    {session ? <button className="more" onClick={() => void signOut()} aria-label="Sign out">↗</button>
+    {session ? <button className="sign-out-button" onClick={() => void signOut()}>Sign out</button>
       : <a className="more" href="/oauth2/authorization/finbridge" aria-label="Sign in">→</a>}</div>;
 }
 
@@ -165,10 +187,10 @@ function BorrowerPage() {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const form = new FormData(event.currentTarget);
     setBusy(true); setError("");
     try {
       const csrf = await fetch("/api/csrf").then(response => response.json());
-      const form = new FormData(event.currentTarget);
       const response = await fetch("/api/borrower/applications", {
         method: "POST",
         credentials: "same-origin",
@@ -179,22 +201,21 @@ function BorrowerPage() {
           currency: String(form.get("currency")),
           termMonths: Number(form.get("term")) }),
       });
-      if (!response.ok) throw new Error(`Application failed (${response.status})`);
+      if (!response.ok) throw await requestError("Application", response);
       const created = await response.json();
-      const evaluateCsrf = await fetch("/api/csrf").then(result => result.json());
-      const evaluation = await fetch(`/api/borrower/applications/${created.applicationId}/evaluate`, {
-        method: "POST",
-        headers: { [evaluateCsrf.headerName]: evaluateCsrf.token,
-          "X-Correlation-Id": `borrower-${crypto.randomUUID()}` },
-      });
-      if (!evaluation.ok) throw new Error(`Risk evaluation failed (${evaluation.status})`);
-      const decision = await evaluation.json();
+      const decision = await api.evaluateBorrower(created.applicationId);
       await refresh();
       setSelectedStatus(previous => ({ ...previous, [created.applicationId]:
-        `${created.status} / ${decision.decision ?? decision.status}` }));
+        `${created.status} / ${decision.decision ?? decision.status}${decision.reasonCodes?.length
+          ? ` · ${decision.reasonCodes.join(", ")}` : ""}` }));
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Application failed."); }
     finally { setBusy(false); }
   };
+
+  async function requestError(action: string, response: Response) {
+    const problem = await response.json().catch(() => null) as { message?: string } | null;
+    return new Error(`${action} failed (${response.status})${problem?.message ? `: ${problem.message}` : ""}`);
+  }
 
   if (!session?.authenticated) return <main className="borrower-shell">
     <div className="borrower-card"><div className="kicker">FINBRIDGE / SYNTHETIC BORROWER DEMO</div>
@@ -225,9 +246,11 @@ function BorrowerPage() {
       <Status value={selectedStatus[application.applicationId] ?? application.status} />
       <button className="text-button" onClick={async () => {
         const status = await fetch(`/api/borrower/applications/${application.applicationId}`).then(r => r.json());
+        const assessment = status.assessments?.[0];
         setSelectedStatus(previous => ({ ...previous, [application.applicationId]:
-          `${status.application.status}${status.assessments?.[0]?.decision
-            ? ` / ${status.assessments[0].decision}` : ""} / ${status.workflow?.state ?? "NO_WORKFLOW"}`
+          `${status.application.status}${assessment?.decision
+            ? ` / ${assessment.decision}${assessment.reasonCodes?.length
+              ? ` · ${assessment.reasonCodes.join(", ")}` : ""}` : ""} / ${status.workflow?.state ?? "NO_WORKFLOW"}`
           + (status.loan ? ` / LOAN ${status.loan.status}` : "") }));
       }}>Check status</button></article>) : <p>No applications yet.</p>}
     <button className="button secondary" onClick={async () => {
@@ -343,7 +366,9 @@ function ApplicationTable({ applications, loading, error, onSelect, compact = fa
   </section>;
 }
 
-function ApplicationRecord({ id, onBack, notify }: { id: string; onBack: () => void; notify: (message: string) => void }) {
+function ApplicationRecord({ id, onBack, onInspectLoan, notify }: {
+  id: string; onBack: () => void; onInspectLoan: (loanId: string) => void; notify: (message: string) => void;
+}) {
   const resource = useResource(() => api.application(id), [id]);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -359,17 +384,20 @@ function ApplicationRecord({ id, onBack, notify }: { id: string; onBack: () => v
     <button className="back-link" onClick={onBack}>← Applications</button>
     <PageHeading kicker={`APPLICATION / ${application.applicationId.slice(0, 8).toUpperCase()}`} title={application.applicantId} description={`${application.productCode} · ${application.termMonths} month term · submitted ${stamp(application.createdAt)}`} actions={<Status value={application.status} />} />
     {actionError && <div className="inline-error">{actionError}</div>}
-    <div className="detail-grid"><section className="panel detail-main"><div className="panel-header"><div><div className="panel-overline">RISK ASSESSMENT</div><h2>Decision record</h2></div>{application.status === "SUBMITTED" && <button className="button dark" disabled={busy} onClick={() => run(() => api.evaluate(id), "Risk assessment persisted.")}>{busy ? "Working…" : "Evaluate application"}</button>}</div>
+    <div className="detail-grid"><section className="panel detail-main"><div className="panel-header"><div><div className="panel-overline">RISK ASSESSMENT</div><h2>Decision record</h2></div>{["SUBMITTED", "RISK_EVALUATING"].includes(application.status) && <button className="button dark" disabled={busy} onClick={() => run(() => api.evaluate(id), "Risk assessment persisted.")}>{busy ? "Working…" : application.status === "RISK_EVALUATING" ? "Retry evaluation" : "Evaluate application"}</button>}</div>
       {assessments.length ? assessments.map(item => <div className="assessment" key={item.assessmentId}><div className="assessment-decision"><span className={`decision-stamp ${(item.decision ?? "PENDING").toLowerCase()}`}>{item.decision ?? item.status}</span><div><b>{item.policyVersion}</b><small>completed {stamp(item.completedAt)}</small></div></div><div className="evidence-grid"><DataPoint label="CREDIT SCORE" value={item.creditScore ?? "Unavailable"} /><DataPoint label="BLACKLIST" value={item.blacklistHit == null ? "Unavailable" : item.blacklistHit ? "Hit" : "Clear"} /><DataPoint label="FRAUD SIGNAL" value={item.fraudSignal ?? "Unavailable"} /></div><div className="reason-list">{item.reasonCodes.map(reason => <span key={reason}>{reason}</span>)}</div></div>) : <div className="empty"><b>No risk assessment is persisted</b><p>Evaluation is a separate, read-only provider step. Approval does not originate or activate a loan.</p></div>}
-      <div className="panel-subsection"><div className="panel-overline">ORIGINATION</div>{loan ? <div className="origination-card"><span>Loan created</span><b>{loan.loanId}</b><Status value={loan.status} /><button className="text-button" onClick={() => notify("Open the loan book to inspect its repayment plan and payment state.")}>Inspect loan ↗</button></div> : application.status === "APPROVED" ? <div className="action-callout"><div><b>Approved and eligible for origination</b><p>Loan and repayment schedule creation are separate from payment disbursement.</p></div><button className="button primary" disabled={busy} onClick={() => run(() => api.originate(id), "Pending-disbursement loan originated.")}>{busy ? "Working…" : "Originate loan"}</button></div> : <p className="muted-copy">No loan has been originated from this application.</p>}</div>
+      <div className="panel-subsection"><div className="panel-overline">ORIGINATION</div>{loan ? <div className="origination-card"><span>Loan created</span><b>{loan.loanId}</b><Status value={loan.status} /><button className="text-button" onClick={() => onInspectLoan(loan.loanId)}>Inspect loan ↗</button></div> : application.status === "APPROVED" ? <div className="action-callout"><div><b>Approved and eligible for origination</b><p>Loan and repayment schedule creation are separate from payment disbursement.</p></div><button className="button primary" disabled={busy} onClick={() => run(() => api.originate(id), "Pending-disbursement loan originated.")}>{busy ? "Working…" : "Originate loan"}</button></div> : <p className="muted-copy">No loan has been originated from this application.</p>}</div>
     </section><aside className="panel side-panel"><div className="panel-overline">APPLICATION SNAPSHOT</div><DataPoint label="REQUESTED PRINCIPAL" value={money(application.requestedAmount, application.currency)} /><DataPoint label="TERM" value={`${application.termMonths} months`} /><DataPoint label="PRODUCT SNAPSHOT" value={`${application.productCode} · v${application.productVersion}`} /><DataPoint label="UPDATED" value={stamp(application.updatedAt)} /><div className="side-divider"/><div className="panel-overline">IDENTIFIERS</div><CopyValue label="APPLICATION ID" value={application.applicationId} /></aside></div>
   </>;
 }
 
 function LoansPage({ onSelect }: { onSelect: (id: string) => void }) {
   const resource = useResource(api.loans);
+  const applications = useResource(api.applications);
+  const applicants = new Map((applications.data ?? []).map(application => [application.applicationId,
+    application.applicantId]));
   return <><PageHeading kicker="PORTFOLIO / SERVICING" title="Loan book" description="Persisted loan lifecycle, with activation distinguished from approval and origination." />
-    {resource.loading || resource.error ? <div className="panel"><Loading error={resource.error} retry={resource.reload} /></div> : <div className="loan-grid">{resource.data?.map(loan => <button className="loan-card panel" key={loan.loanId} onClick={() => onSelect(loan.loanId)}><div className="loan-card-top"><span className="panel-overline">{loan.productCode}</span><Status value={loan.status} /></div><strong>{money(loan.principal, loan.currency)}</strong><span className="loan-ref">{loan.loanId.slice(0, 8)}… · {loan.termMonths} months</span><div className="loan-card-bottom"><span>Created {stamp(loan.createdAt)}</span><b>↗</b></div></button>)}{!resource.data?.length && <div className="panel empty"><b>No persisted loans yet</b><p>Loans appear after an approved application is originated.</p></div>}</div>}
+    {resource.loading || resource.error || applications.error ? <div className="panel"><Loading error={resource.error ?? applications.error} retry={() => { void resource.reload(); void applications.reload(); }} /></div> : <div className="loan-grid">{resource.data?.map(loan => <button className="loan-card panel" key={loan.loanId} onClick={() => onSelect(loan.loanId)}><div className="loan-card-top"><span className="panel-overline">{loan.productCode}</span><Status value={loan.status} /></div><strong>{money(loan.principal, loan.currency)}</strong><span className="loan-ref">Applicant {applicants.get(loan.applicationId) ?? "Unknown"}</span><span className="loan-ref">{loan.loanId.slice(0, 8)}… · {loan.termMonths} months</span><div className="loan-card-bottom"><span>Created {stamp(loan.createdAt)}</span><b>↗</b></div></button>)}{!resource.data?.length && <div className="panel empty"><b>No persisted loans yet</b><p>Loans appear after an approved application is originated.</p></div>}</div>}
   </>;
 }
 
@@ -401,16 +429,19 @@ function InstallmentTable({ plan, currency }: { plan: RepaymentPlan; currency: s
 
 function RepaymentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const loans = useResource(api.loans);
+  const applications = useResource(api.applications);
+  const applicants = new Map((applications.data ?? []).map(application => [application.applicationId,
+    application.applicantId]));
   return <><PageHeading kicker="SERVICING / SCHEDULES" title="Repayment plans" description="Installments are persisted as pending until confirmed disbursement activates and dates the schedule." />
-    {loans.loading || loans.error ? <div className="panel"><Loading error={loans.error} retry={loans.reload} /></div> : <div className="repayment-list">{(loans.data ?? []).map(loan => <RepaymentSummary key={loan.loanId} loan={loan} onSelect={onSelect} />)}{!loans.data?.length && <div className="panel empty"><b>No repayment schedules</b><p>Originate an approved application to generate a pending schedule.</p></div>}</div>}
+    {loans.loading || loans.error || applications.error ? <div className="panel"><Loading error={loans.error ?? applications.error} retry={() => { void loans.reload(); void applications.reload(); }} /></div> : <div className="repayment-list">{(loans.data ?? []).map(loan => <RepaymentSummary key={loan.loanId} loan={loan} applicantId={applicants.get(loan.applicationId)} onSelect={onSelect} />)}{!loans.data?.length && <div className="panel empty"><b>No repayment schedules</b><p>Originate an approved application to generate a pending schedule.</p></div>}</div>}
   </>;
 }
 
-function RepaymentSummary({ loan, onSelect }: { loan: Loan; onSelect: (id: string) => void }) {
+function RepaymentSummary({ loan, applicantId, onSelect }: { loan: Loan; applicantId?: string; onSelect: (id: string) => void }) {
   const plan = useResource<RepaymentPlan>(() => api.repaymentPlan(loan.loanId), [loan.loanId]);
   if (plan.loading) return <div className="panel compact-panel"><span className="spinner" /> Loading schedule…</div>;
   if (plan.error || !plan.data) return <div className="panel compact-panel"><b>{loan.productCode}</b><span className="muted-copy">Schedule unavailable: {plan.error}</span></div>;
-  return <button className="panel repayment-summary click-row" onClick={() => onSelect(loan.loanId)}><div><div className="panel-overline">{loan.productCode} · {loan.termMonths} PAYMENTS</div><b>{money(plan.data.totalRepayable, loan.currency)}</b><small>{loan.loanId.slice(0, 8)}…</small></div><div className="repayment-summary-right"><Status value={plan.data.status} /><span>{plan.data.status === "ACTIVE" ? `${plan.data.installments.filter(item => item.dueDate).length} due dates established` : "Dates finalize after disbursement"}</span></div><b className="row-arrow">↗</b></button>;
+  return <button className="panel repayment-summary click-row" onClick={() => onSelect(loan.loanId)}><div><div className="panel-overline">{loan.productCode} · {loan.termMonths} PAYMENTS</div><b>{money(plan.data.totalRepayable, loan.currency)}</b><small>Applicant {applicantId ?? "Unknown"} · {loan.loanId.slice(0, 8)}…</small></div><div className="repayment-summary-right"><Status value={plan.data.status} /><span>{plan.data.status === "ACTIVE" ? `${plan.data.installments.filter(item => item.dueDate).length} due dates established` : "Dates finalize after disbursement"}</span></div><b className="row-arrow">↗</b></button>;
 }
 
 function PluginsPage({ notify }: { notify: (message: string) => void }) {

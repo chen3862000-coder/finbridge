@@ -8,12 +8,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Calculates fixed-payment schedules with exact decimal amounts and a reconciled final installment. */
 public final class RepaymentScheduleCalculator {
     private static final MathContext INTERMEDIATE = MathContext.DECIMAL128;
     private static final BigDecimal TWELVE = BigDecimal.valueOf(12);
     private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
     private static final int MONEY_SCALE = 2;
 
+    /**
+     * Calculates a monthly amortization schedule using DECIMAL128 intermediates and scale-2
+     * HALF_UP rounding; the final installment absorbs rounding residuals so principal reconciles.
+     *
+     * @throws IllegalArgumentException when inputs are invalid or the terms do not amortize
+     */
     public List<RepaymentInstallment> calculate(UUID planId, BigDecimal principal,
                                                  BigDecimal annualInterestRatePercent,
                                                  int installmentCount) {

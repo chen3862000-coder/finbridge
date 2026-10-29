@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.ServiceConfigurationError;
 import java.util.UUID;
 
+/** Loads external provider artifacts and coordinates registry, tenant routing, and lifecycle state. */
 public final class PluginRuntime {
     private final PluginArtifactRepository artifacts;
     private final PluginDiscovery discovery;
@@ -29,6 +30,7 @@ public final class PluginRuntime {
         this.supportedSpiMajor = supportedSpiMajor;
     }
 
+    /** Validates and loads one allowlisted artifact without activating it. */
     public PluginHandle install(String artifactName, PluginContext context) {
         Objects.requireNonNull(context, "context");
         Path artifact = artifacts.resolve(Objects.requireNonNull(artifactName, "artifactName"));
@@ -53,22 +55,27 @@ public final class PluginRuntime {
         }
     }
 
+    /** Returns a snapshot of loaded plugin handles. */
     public List<PluginHandle> plugins() {
         return registry.plugins();
     }
 
+    /** Returns the loaded handle for a stable plugin identity. */
     public PluginHandle plugin(PluginKey key) {
         return registry.plugin(Objects.requireNonNull(key, "key"));
     }
 
+    /** Makes a successfully loaded provider available for new bindings and invocations. */
     public void activate(PluginKey key) {
         plugin(key).activate();
     }
 
+    /** Resumes a draining provider when a lifecycle operation is safely rolled back. */
     public void resumeFromDrain(PluginKey key) {
         plugin(key).resumeFromDrain();
     }
 
+    /** Discards a loaded but not active provider and removes it from the registry. */
     public void discardLoaded(PluginKey key) throws IOException {
         PluginHandle handle = plugin(key);
         handle.discardLoaded();
@@ -77,6 +84,7 @@ public final class PluginRuntime {
         }
     }
 
+    /** Loads a risk provider only when its advertised data type matches the expected capability. */
     public PluginHandle installRiskProvider(String artifactName, PluginContext context,
                                             io.github.finbridge.spi.risk.RiskDataType expectedType) {
         Objects.requireNonNull(context, "context");
@@ -114,10 +122,12 @@ public final class PluginRuntime {
         }
     }
 
+    /** Returns the current tenant binding for a capability. */
     public PluginBinding binding(UUID tenantId, Capability capability) {
         return bindingRegistry.binding(tenantId, capability);
     }
 
+    /** Publishes an optimistic binding to an active provider supporting the capability. */
     public PluginBinding bind(UUID tenantId, Capability capability, PluginKey pluginKey,
                               long expectedVersion) {
         Objects.requireNonNull(tenantId, "tenantId");
@@ -132,6 +142,7 @@ public final class PluginRuntime {
         return bindingRegistry.bind(tenantId, capability, target, pluginKey, expectedVersion);
     }
 
+    /** Restores a persisted binding after its provider has been verified and activated. */
     public PluginBinding restoreBinding(UUID tenantId, Capability capability, PluginKey pluginKey,
             long persistedVersion) {
         Objects.requireNonNull(tenantId, "tenantId");
@@ -146,6 +157,7 @@ public final class PluginRuntime {
         return bindingRegistry.restore(tenantId, capability, pluginKey, persistedVersion);
     }
 
+    /** Publishes a binding already committed by the durable control plane. */
     public PluginBinding publishBinding(PluginBinding binding) {
         Objects.requireNonNull(binding, "binding");
         PluginHandle target = plugin(binding.pluginKey());
@@ -156,20 +168,27 @@ public final class PluginRuntime {
         return bindingRegistry.publish(binding);
     }
 
+    /** Removes a tenant binding only if its current revision matches the expected value. */
     public long unbind(UUID tenantId, Capability capability, long expectedVersion) {
         return bindingRegistry.unbind(tenantId, capability, expectedVersion);
     }
 
+    /** Applies a previously persisted unbind revision to in-memory routing. */
     public long publishUnbind(UUID tenantId, Capability capability, long nextVersion) {
         return bindingRegistry.publishUnbind(tenantId, capability, nextVersion);
     }
 
+    /** Acquires an invocation lease for the provider currently routed to this tenant/capability. */
     public PluginInvocationLease route(UUID tenantId, Capability capability,
                                        InvocationKind invocationKind) {
         PluginBinding selected = binding(tenantId, capability);
         return plugin(selected.pluginKey()).acquire(invocationKind);
     }
 
+    /**
+     * Stops new business routing and waits for active invocations, retaining bound or owner-pinned
+     * providers. Reconciliation may still acquire a lease while the provider drains.
+     */
     public boolean drain(PluginKey key, java.time.Duration timeout,
                          PluginRetentionPolicy retentionPolicy) throws InterruptedException {
         PluginHandle handle = plugin(key);
@@ -185,6 +204,7 @@ public final class PluginRuntime {
         return handle.awaitDrained(timeout);
     }
 
+    /** Unloads only after bindings, retained payment ownership, and invocation leases are clear. */
     public void unload(PluginKey key, java.time.Duration timeout,
                        PluginRetentionPolicy retentionPolicy) throws IOException, InterruptedException {
         PluginHandle handle = plugin(key);

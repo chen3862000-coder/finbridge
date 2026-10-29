@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/** Routes bounded provider reads and normalizes failures without making lending decisions. */
 public final class RiskDataGateway {
     private final PluginRuntime runtime;
     private final ExecutorService executor;
@@ -44,6 +45,7 @@ public final class RiskDataGateway {
         }
     }
 
+    /** Queries every supported risk-data type for a synthetic applicant and returns immutable outcomes. */
     public Map<RiskDataType, RiskProviderOutcome> collect(UUID tenantId, UUID assessmentId,
                                                            String syntheticApplicantId,
                                                            String correlationId) {
@@ -58,6 +60,7 @@ public final class RiskDataGateway {
         return Map.copyOf(outcomes);
     }
 
+    /** Queries the tenant-bound provider for one data type with a bounded invocation lease. */
     public RiskProviderOutcome query(UUID tenantId, RiskDataType type, RiskDataRequest request,
                                      OperationContext context) {
         Objects.requireNonNull(type, "type");

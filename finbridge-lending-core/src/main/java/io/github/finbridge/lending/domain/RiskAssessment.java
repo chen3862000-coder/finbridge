@@ -24,7 +24,8 @@ public record RiskAssessment(UUID assessmentId, UUID applicationId, UUID tenantI
             throw new IllegalArgumentException("Completed assessment requires decision, policy and time");
         }
         if (status == AssessmentStatus.COMPLETED && creditScore == null && blacklistHit == null
-                && fraudSignal == null) {
+                && fraudSignal == null && (decision != AssessmentDecision.REVIEW
+                || !reasonCodes.contains("MANDATORY_RISK_DATA_UNAVAILABLE"))) {
             throw new IllegalArgumentException("Completed assessment must contain normalized evidence");
         }
         if (completedAt != null && completedAt.isBefore(createdAt)) {

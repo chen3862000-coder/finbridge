@@ -70,6 +70,9 @@ export type RiskAssessment = {
   completedAt: string | null;
 };
 
+export type BorrowerRiskStatus = Pick<RiskAssessment,
+  "status" | "decision" | "policyVersion" | "completedAt" | "creditScore" | "blacklistHit" | "fraudSignal" | "reasonCodes">;
+
 export type Workflow = {
   workflowId: string;
   applicationId: string;
@@ -145,21 +148,42 @@ export type ApplicationDetail = {
 export type LoanDetail = { loan: Loan; repaymentPlan: RepaymentPlan; payment: Payment | null };
 export type WorkflowDetail = { workflow: Workflow; steps: WorkflowStep[]; correlationId: string | null };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, emptyResponse?: T): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(init?.body ? { "Content-Type": "application/json" } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrfResponse = await fetch("/api/csrf", { credentials: "same-origin" });
+    if (!csrfResponse.ok) throw new Error(`Could not obtain CSRF token (${csrfResponse.status})`);
+    const csrf = await csrfResponse.json() as { headerName: string; token: string };
+    headers[csrf.headerName] = csrf.token;
+  }
   const response = await fetch(path, {
     ...init,
-    headers: {
-      Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    credentials: "same-origin",
+    headers,
   });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (response.redirected || contentType.includes("text/html")) {
+    throw new Error("Your session has expired or you are signed out. Sign in again, then retry.");
+  }
   if (!response.ok) {
     const problem = await response.json().catch(() => null) as { code?: string; message?: string } | null;
     throw new Error(problem?.message ?? `Request failed (${response.status})`);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  if (response.status === 204) {
+    if (emptyResponse !== undefined) return emptyResponse;
+    throw new Error(`Request returned no data (${path})`);
+  }
+  const body = await response.text();
+  if (!body.trim()) {
+    if (emptyResponse !== undefined) return emptyResponse;
+    throw new Error(`Request returned an empty response (${path})`);
+  }
+  return JSON.parse(body) as T;
 }
 
 function correlationId() {
@@ -174,7 +198,7 @@ export const api = {
     const application = await request<LoanApplication>(`/api/console/applications/${id}`);
     const [assessments, loan] = await Promise.all([
       request<RiskAssessment[]>(`/api/console/applications/${id}/assessments`),
-      request<Loan | null>(`/api/console/applications/${id}/loan`),
+      request<Loan | null>(`/api/console/applications/${id}/loan`, undefined, null),
     ]);
     return { application, assessments, loan } satisfies ApplicationDetail;
   },
@@ -187,16 +211,12 @@ export const api = {
   evaluate: (id: string) => request<RiskAssessment>(`/api/console/applications/${id}/evaluate`, {
     method: "POST", headers: { "X-Correlation-Id": correlationId() },
   }),
+  evaluateBorrower: (id: string) => request<BorrowerRiskStatus>(`/api/borrower/applications/${id}/evaluate`, {
+    method: "POST", headers: { "X-Correlation-Id": correlationId() },
+  }),
   originate: (id: string) => request<Loan>(`/api/console/applications/${id}/originate`, { method: "POST" }),
   loans: () => request<Loan[]>("/api/console/loans?limit=100"),
-  loan: async (id: string) => {
-    const loan = await request<Loan>(`/api/console/loans/${id}`);
-    const [repaymentPlan, payment] = await Promise.all([
-      request<RepaymentPlan>(`/api/console/loans/${id}/repayment-plan`),
-      request<Payment | null>(`/api/console/loans/${id}/payment`),
-    ]);
-    return { loan, repaymentPlan, payment } satisfies LoanDetail;
-  },
+  loan: (id: string) => request<LoanDetail>(`/api/console/loans/${id}`),
   repaymentPlan: (id: string) => request<RepaymentPlan>(`/api/console/loans/${id}/repayment-plan`),
   payment: (id: string) => request<Payment>(`/api/console/loans/${id}/payment`),
   disburse: (id: string) => request<Payment>(`/api/console/loans/${id}/disburse`, {

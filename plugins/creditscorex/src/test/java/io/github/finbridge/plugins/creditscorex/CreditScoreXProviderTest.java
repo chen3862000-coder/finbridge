@@ -17,6 +17,8 @@ class CreditScoreXProviderTest {
                 .value()).score());
         assertEquals(640, ((CreditScoreValue) provider.query(request("review-score"), context())
                 .value()).score());
+        assertEquals(640, ((CreditScoreValue) provider.query(request("demo-borrower-alpha-review-self"), context())
+                .value()).score());
         assertEquals(720, ((CreditScoreValue) provider.query(request("normal"), context())
                 .value()).score());
         assertEquals("creditscorex", provider.descriptor().pluginId());

@@ -29,6 +29,6 @@ public final class BlacklistYProvider implements RiskDataProvider {
     @Override
     public RiskDataResult query(RiskDataRequest request, OperationContext context) {
         return RiskDataResult.available(new BlacklistValue(
-                request.syntheticApplicantId().contains("blacklisted")));
+                request.syntheticApplicantId().contains("blacklist")));
     }
 }

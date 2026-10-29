@@ -11,6 +11,7 @@ import static org.mockito.Mockito.inOrder;
 import io.github.finbridge.spi.PluginKey;
 import io.github.finbridge.runtime.PluginHandle;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -162,6 +163,24 @@ class HostAuthorizationTest {
     }
 
     @Test
+    void tenantApplicationListUsesPrincipalTenant() {
+        UUID tenant = UUID.randomUUID();
+        var application = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        var applications = mock(io.github.finbridge.lending.application.LendingApplicationService.class);
+        var facade = new TenantLendingFacade(applications,
+                mock(io.github.finbridge.lending.application.RiskAssessmentService.class),
+                mock(io.github.finbridge.lending.application.DisbursementService.class),
+                mock(io.github.finbridge.lending.application.LoanOriginationService.class),
+                mock(TenantConsoleReadRepository.class));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new FinBridgePrincipal("tenant-user", tenant), "", List.of()));
+        when(applications.listApplications(tenant, 25)).thenReturn(List.of(application));
+
+        assertEquals(List.of(application), facade.listApplicationsForCurrentTenant(25));
+        verify(applications).listApplications(tenant, 25);
+    }
+
+    @Test
     void borrowerFacadeScopesSyntheticApplicantAndApplicationListToPrincipal() {
         UUID tenant = UUID.randomUUID();
         var applications = mock(io.github.finbridge.lending.application.LendingApplicationService.class);
@@ -174,7 +193,11 @@ class HostAuthorizationTest {
                 new FinBridgePrincipal("borrower-a", tenant), "", List.of()));
         var created = mock(io.github.finbridge.lending.domain.LoanApplication.class);
         when(applications.createApplication(org.mockito.ArgumentMatchers.any())).thenReturn(created);
-        when(applications.listApplications(tenant, 10)).thenReturn(List.of());
+        var ownApplication = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        when(ownApplication.applicantId()).thenReturn("demo-borrower-a-self");
+        var otherApplication = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        when(otherApplication.applicantId()).thenReturn("demo-borrower-b-self");
+        when(applications.listApplications(tenant, 10)).thenReturn(List.of(ownApplication, otherApplication));
 
         assertEquals(created, facade.applyForCurrentTenant("self", "CASH_LOAN_DEMO",
                 new java.math.BigDecimal("1200.00"), java.util.Currency.getInstance("CNY"), 3, "borrower-key"));
@@ -183,9 +206,57 @@ class HostAuthorizationTest {
         verify(applications).createApplication(command.capture());
         assertEquals(tenant, command.getValue().tenantId());
         assertEquals("demo-borrower-a-self", command.getValue().applicantId());
-        assertEquals(List.of(), facade.listApplicationsForCurrentTenant(10));
+        assertEquals(List.of(ownApplication), facade.listApplicationsForCurrentBorrower(10));
         verify(applications).listApplications(tenant, 10);
 
+    }
+
+    @Test
+    void borrowerOwnedReadsAndActionsVerifyApplicantBeforeUsingLoanServices() {
+        UUID tenant = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        UUID loanId = UUID.randomUUID();
+        var applicationService = mock(io.github.finbridge.lending.application.LendingApplicationService.class);
+        var risk = mock(io.github.finbridge.lending.application.RiskAssessmentService.class);
+        var payments = mock(io.github.finbridge.lending.application.DisbursementService.class);
+        var origination = mock(io.github.finbridge.lending.application.LoanOriginationService.class);
+        var consoleReads = mock(TenantConsoleReadRepository.class);
+        var facade = new TenantLendingFacade(applicationService, risk, payments, origination, consoleReads);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new FinBridgePrincipal("borrower-a", tenant), "", List.of()));
+        var owned = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        when(owned.applicantId()).thenReturn("demo-borrower-a-self");
+        when(owned.applicationId()).thenReturn(applicationId);
+        when(owned.tenantId()).thenReturn(tenant);
+        when(applicationService.getApplication(tenant, applicationId)).thenReturn(owned);
+        var loan = mock(io.github.finbridge.lending.domain.Loan.class);
+        when(loan.applicationId()).thenReturn(applicationId);
+        when(loan.loanId()).thenReturn(loanId);
+        when(origination.getLoan(tenant, loanId)).thenReturn(loan);
+        var riskAssessment = mock(io.github.finbridge.lending.domain.RiskAssessment.class);
+        when(risk.evaluate(tenant, applicationId, "risk-correlation")).thenReturn(riskAssessment);
+        when(origination.originate(tenant, applicationId)).thenReturn(loan);
+        var plan = mock(io.github.finbridge.lending.domain.RepaymentPlan.class);
+        when(consoleReads.repaymentPlan(tenant, loanId)).thenReturn(plan);
+        var payment = mock(io.github.finbridge.lending.persistence.LendingAggregateRepository.DisbursementClaim.class);
+        when(consoleReads.payment(tenant, loanId)).thenReturn(Optional.of(payment));
+        when(payments.dispatch(tenant, loanId, "idempotency", "dispatch-correlation")).thenReturn(payment);
+        when(payments.reconcile(tenant, loanId, "reconcile-correlation")).thenReturn(payment);
+
+        assertEquals(owned, facade.borrowerApplication(applicationId));
+        assertEquals(riskAssessment, facade.evaluateForCurrentBorrower(applicationId, "risk-correlation"));
+        assertEquals(loan, facade.originateForCurrentBorrower(applicationId));
+        assertEquals(loan, facade.borrowerLoan(loanId));
+        assertEquals(plan, facade.borrowerRepaymentPlan(loanId));
+        assertEquals(Optional.of(payment), facade.borrowerPaymentIfPresent(loanId));
+        assertEquals(payment, facade.dispatchForCurrentBorrower(loanId, "idempotency", "dispatch-correlation"));
+        assertEquals(payment, facade.reconcileForCurrentBorrower(loanId, "reconcile-correlation"));
+
+        var otherApplicant = mock(io.github.finbridge.lending.domain.LoanApplication.class);
+        when(otherApplicant.applicantId()).thenReturn("demo-borrower-b-self");
+        when(applicationService.getApplication(tenant, applicationId)).thenReturn(otherApplicant);
+        assertThrows(io.github.finbridge.lending.application.LendingCoreException.class,
+                () -> facade.borrowerApplication(applicationId));
     }
 
     @Test

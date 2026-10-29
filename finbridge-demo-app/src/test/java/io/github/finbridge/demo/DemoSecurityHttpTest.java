@@ -109,6 +109,22 @@ class DemoSecurityHttpTest {
         org.junit.jupiter.api.Assertions.assertNotNull(borrowerAdminRoute);
     }
 
+    @Test
+    void oidcLoginRequestsCredentialsAndRetainsPkce() throws Exception {
+        var response = mvc.perform(get("/oauth2/authorization/finbridge"))
+                .andExpect(status().is3xxRedirection())
+                .andReturn().getResponse();
+        var authorization = java.net.URI.create(response.getRedirectedUrl());
+        var parameters = java.util.Arrays.stream(authorization.getRawQuery().split("&"))
+                .map(parameter -> parameter.split("=", 2))
+                .collect(java.util.stream.Collectors.toMap(parts -> parts[0],
+                        parts -> parts.length == 2 ? parts[1] : ""));
+
+        org.junit.jupiter.api.Assertions.assertEquals("login", parameters.get("prompt"));
+        org.junit.jupiter.api.Assertions.assertEquals("S256", parameters.get("code_challenge_method"));
+        org.junit.jupiter.api.Assertions.assertNotNull(parameters.get("code_challenge"));
+    }
+
     private static org.springframework.test.web.servlet.request.RequestPostProcessor mappedLogin(
             String subject, UUID tenant, boolean admin) {
         var idToken = org.springframework.security.oauth2.core.oidc.OidcIdToken.withTokenValue("test-token")

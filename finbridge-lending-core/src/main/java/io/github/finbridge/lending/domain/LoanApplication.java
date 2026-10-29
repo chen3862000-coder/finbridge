@@ -6,6 +6,7 @@ import java.util.Currency;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Tenant-owned application snapshot with a validated, versioned state transition history. */
 public record LoanApplication(UUID applicationId, UUID tenantId, String applicantId,
                               String productCode, int productVersion, BigDecimal requestedAmount,
                               Currency currency, int termMonths, ApplicationStatus status,
@@ -25,6 +26,11 @@ public record LoanApplication(UUID applicationId, UUID tenantId, String applican
         }
     }
 
+    /**
+     * Returns a new application in {@code next}; only transitions in the domain state graph are allowed.
+     *
+     * @throws IllegalStateException when the requested transition is not valid from the current status
+     */
     public LoanApplication transitionTo(ApplicationStatus next, Instant at) {
         Objects.requireNonNull(next, "next");
         Objects.requireNonNull(at, "at");

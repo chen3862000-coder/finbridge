@@ -23,6 +23,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/** Invokes payment providers with bounded execution and preserves unknown outcomes as ambiguous. */
 public final class PaymentGateway {
     private final ExecutorService executor;
     private final Duration timeout;
@@ -41,6 +42,7 @@ public final class PaymentGateway {
         }
     }
 
+    /** Calls the specified owner once; timeouts and invocation failures return UNKNOWN. */
     public DisbursementOutcome disburse(PluginRuntime runtime, PluginKey owner,
             DisbursementRequest request, OperationContext context) {
         Objects.requireNonNull(runtime, "runtime");
@@ -56,6 +58,7 @@ public final class PaymentGateway {
         }
     }
 
+    /** Queries status using the original owner and either its provider ID or host idempotency reference. */
     public DisbursementOutcome reconcile(PluginRuntime runtime, PluginKey owner,
             UUID paymentTransactionId, String idempotencyKey, String providerTransactionId,
             OperationContext context) {
@@ -160,6 +163,7 @@ public final class PaymentGateway {
         }
     }
 
+    /** Normalized payment outcome; UNKNOWN means the external effect requires later reconciliation. */
     public record DisbursementOutcome(PluginKey owner, PaymentStatus status,
                                       String providerTransactionId, String diagnosticCode) {
         public DisbursementOutcome {

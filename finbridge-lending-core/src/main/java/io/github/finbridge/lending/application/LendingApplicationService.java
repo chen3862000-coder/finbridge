@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
+/** Coordinates tenant-scoped application validation, idempotent creation, and state transitions. */
 @Service
 public class LendingApplicationService {
     private final ApplicationRepositoryBoundary applications;
@@ -31,6 +32,7 @@ public class LendingApplicationService {
         this.clock = clock;
     }
 
+    /** Creates an application against the current active product version and deduplicates by request key. */
     public LoanApplication createApplication(CreateLoanApplicationCommand command) {
         Objects.requireNonNull(command, "command");
         LoanProduct product = products.findActive(command.productCode())
@@ -44,11 +46,13 @@ public class LendingApplicationService {
         return applications.insert(application, command.idempotencyKey(), fingerprint(command));
     }
 
+    /** Returns an application only within the supplied tenant. */
     public LoanApplication getApplication(UUID tenantId, UUID applicationId) {
         return applications.find(tenantId, applicationId)
                 .orElseThrow(() -> new LendingCoreException("Loan application was not found"));
     }
 
+    /** Lists recent applications for one tenant. */
     public List<LoanApplication> listApplications(UUID tenantId, int limit) {
         Objects.requireNonNull(tenantId, "tenantId");
         return applications.findRecent(tenantId, limit);

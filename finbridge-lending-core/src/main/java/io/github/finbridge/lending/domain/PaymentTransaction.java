@@ -7,6 +7,7 @@ import java.util.Currency;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Durable payment intent and outcome pinned to the provider version that owns reconciliation. */
 public record PaymentTransaction(UUID paymentTransactionId, UUID tenantId, UUID loanId,
         String operationType, String idempotencyKey, String requestFingerprint,
         BigDecimal amount, Currency currency, PluginKey owner, String providerTransactionId,

@@ -12,19 +12,15 @@ This is a trusted-plugin demonstration, not a security boundary or production pa
 
 ## 2. Repository and Environment Findings
 
-Inspection on 2026-10-26 found a clean `main` worktree containing only the initial commit and a placeholder README. No Maven project, wrapper, Java source, frontend, Docker Compose file, or existing implementation tests are present.
+This document records the repository's original M0 planning state and is retained as superseded design history. The environment observations below describe the initial inspection and are not current toolchain requirements; use the supported setup in [M0 proposal v2](m0-proposal-v2.md) and the getting-started guide.
 
 | Check | Finding |
 |---|---|
-| Installed JDKs | Microsoft OpenJDK 21.0.12.1 and OpenJDK 27 are installed. |
-| Default toolchain | System Maven 3.10.0 currently starts on JDK 27. |
-| JDK 21 compatibility check | Maven 3.10.0 successfully starts with `JAVA_HOME` set to the installed JDK 21. |
-| Maven Wrapper | Not present; `./mvnw -version` could not run. |
-| Docker Compose | `docker compose version` reports v5.6.0. This verifies the CLI only, not that the Docker daemon or a project stack works. |
-| Spring Boot line | Maven Central metadata reports Spring Boot 3.5.16 as a stable 3.x release and Spring Boot 4.x releases separately. Proposed baseline: Boot 3.5.16, subject to checking its release notes and dependency support when the build is created. |
-| SPI / class-loader proof | Not run. There is no project or plugin fixture to exercise. These remain explicit M0 spike acceptance criteria, not completed results. |
+| Original environment observations | The initial planning snapshot included local tool versions and paths. Those machine-specific details are intentionally omitted from this public historical record. |
+| Supported build | Java 21 and the checked-in Maven Wrapper; see the active v2 proposal and getting-started guide. |
+| SPI / class-loader proof | The implementation and M0 spike evidence are recorded in `m0-spikes/RESULTS.md` and the current plugin runtime integration tests. |
 
-The exact Maven Wrapper, frontend package versions, PostgreSQL image, and Spring dependency set should be locked in the M0 build spike before M1. The stable Spring Boot 3.x line is preferred over a 4.x migration for this Java 21 demonstration; the precise patch selection must be rechecked against support status and JDK 21 compatibility at implementation time.
+The initial plan to select and pin these dependencies was completed during implementation. Current versions are declared in the Maven and npm lock/build files; this historical proposal should not be used as an installation guide.
 
 ## 3. Goals, Boundaries, and Invariants
 
@@ -290,7 +286,7 @@ The M0 proposal and proposed ADRs are the only architecture documents currently 
 | `docs/guides/testing-guide.md` | Unit/integration/Testcontainers/class-loader/concurrency commands and known environment constraints | M5 | Planned |
 | `docs/portfolio/case-study.md` | Challenge, architecture, tradeoffs, evidence, value and limitations; no unsupported savings claims | M5 | Planned |
 | `docs/portfolio/architecture-highlights.md` | Five-minute architecture explanation with code/test references and implemented-vs-proposed labels | M5 | Planned |
-| `docs/portfolio/upwork-project-description.md` | Client-facing title, outcomes, stack, contribution, synthetic integration disclaimer | M5 | Planned |
+| Portfolio project summary | Client-facing title, outcomes, stack, contribution, and synthetic integration disclaimer | M5 | Planned |
 | `README.md` | Branding, business problem, architecture, verified quick start/demos/tests, navigation, limitations and disclaimer | M5 | Currently links to the M0 proposal; final README content planned |
 
 Documentation quality gate: every guarantee names its implementing module/class and executable test, states what the test proves, and records limitations. A test must actually run before its result appears in documentation. ADR status remains `Proposed` until the corresponding decision is approved.

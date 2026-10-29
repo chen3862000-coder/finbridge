@@ -37,6 +37,7 @@ class BrowserSession {
     assert.equal(response.status, 302, "BFF should start OIDC authorization");
     const authorizationUrl = response.headers.get("location");
     assert.ok(authorizationUrl?.includes("code_challenge_method=S256"), "PKCE S256 must be used");
+    assert.ok(authorizationUrl.includes("prompt=login"), "login must prompt rather than silently reuse SSO");
 
     response = await this.request(authorizationUrl);
     assert.equal(response.status, 200, "OIDC provider should return login page");
@@ -119,6 +120,8 @@ async function borrowerJourney() {
   });
   assert.equal(evaluation.response.status, 200, JSON.stringify(evaluation.body));
   assert.equal(evaluation.body.decision, "APPROVE");
+  assert.equal(evaluation.body.creditScore, 720);
+  assert.equal(evaluation.body.blacklistHit, false);
 
   const status = await alpha.json(`/api/borrower/applications/${created.body.applicationId}`);
   assert.equal(status.response.status, 200);
@@ -176,6 +179,64 @@ async function borrowerJourney() {
   console.log(`Borrower application/risk E2E passed: ${created.body.applicationId}, ${amount}, APPROVE`);
   await syntheticDecisionJourneys();
   return created.body.applicationId;
+}
+
+async function borrowerApplicationCreateJourney() {
+  const borrower = new BrowserSession();
+  await borrower.login("borrower-alpha", "alpha-local-only");
+  const csrf = await borrower.csrf();
+  const created = await borrower.json("/api/borrower/applications", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [csrf.headerName]: csrf.token,
+      "Idempotency-Key": `csrf-regression-${randomUUID()}`,
+    },
+    body: JSON.stringify({ productCode: "CASH_LOAN_DEMO", amount: "1234.56", currency: "CNY", termMonths: 3 }),
+  });
+  assert.equal(created.response.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.requestedAmount, "1234.56");
+  assert.equal(created.body.applicantId, "demo-borrower-alpha-self");
+  console.log(`Borrower application-create HTTP E2E passed: ${created.body.applicationId}`);
+}
+
+async function consoleApplicationCreateJourney() {
+  const borrower = new BrowserSession();
+  await borrower.login("borrower-alpha", "alpha-local-only");
+  const csrf = await borrower.csrf();
+  const created = await borrower.json("/api/console/applications", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [csrf.headerName]: csrf.token,
+      "Idempotency-Key": `console-csrf-regression-${randomUUID()}`,
+    },
+    body: JSON.stringify({ applicantId: "synthetic-console-applicant", productCode: "CASH_LOAN_DEMO",
+      amount: "1234.56", currency: "CNY", termMonths: 3 }),
+  });
+  assert.equal(created.response.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.requestedAmount, "1234.56");
+  assert.equal(created.body.applicantId, "synthetic-console-applicant");
+  console.log(`Console application-create HTTP E2E passed: ${created.body.applicationId}`);
+}
+
+async function retryApplicationJourney(applicationId) {
+  assert.ok(applicationId, "FINBRIDGE_DEMO_APPLICATION_ID is required");
+  const borrower = new BrowserSession();
+  await borrower.login("borrower-alpha", "alpha-local-only");
+  const csrf = await borrower.csrf();
+  const evaluation = await borrower.json(`/api/borrower/applications/${applicationId}/evaluate`, {
+    method: "POST",
+    headers: { [csrf.headerName]: csrf.token, "X-Correlation-Id": `retry-${randomUUID()}` },
+  });
+  assert.equal(evaluation.response.status, 200, JSON.stringify(evaluation.body));
+  assert.equal(evaluation.body.decision, "REVIEW");
+  const status = await borrower.json(`/api/borrower/applications/${applicationId}`);
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.application.status, "MANUAL_REVIEW");
+  assert.equal(status.body.assessments[0].decision, "REVIEW");
+  assert.equal(status.body.loan, null);
+  console.log(`Interrupted risk assessment recovered to MANUAL_REVIEW: ${applicationId}`);
 }
 
 async function oidcCallbackRejectionJourney() {
@@ -262,11 +323,11 @@ async function sessionExpiryJourney() {
 async function syntheticDecisionJourneys() {
   const scenarios = [
     { username: "borrower-alpha-review", password: "alpha-review-local-only",
-      decision: "REVIEW", applicationStatus: "MANUAL_REVIEW" },
+      decision: "REVIEW", applicationStatus: "MANUAL_REVIEW", creditScore: 640, blacklistHit: false },
     { username: "borrower-alpha-blacklist", password: "alpha-blacklist-local-only",
-      decision: "REJECT", applicationStatus: "REJECTED" },
+      decision: "REJECT", applicationStatus: "REJECTED", creditScore: 720, blacklistHit: true },
     { username: "borrower-alpha-fraud", password: "alpha-fraud-local-only",
-      decision: "REJECT", applicationStatus: "REJECTED" },
+      decision: "REJECT", applicationStatus: "REJECTED", creditScore: 720, blacklistHit: false },
   ];
   for (const scenario of scenarios) {
     const borrower = new BrowserSession();
@@ -293,10 +354,18 @@ async function syntheticDecisionJourneys() {
     });
     assert.equal(evaluation.response.status, 200, JSON.stringify(evaluation.body));
     assert.equal(evaluation.body.decision, scenario.decision);
+    assert.equal(evaluation.body.creditScore, scenario.creditScore);
+    assert.equal(evaluation.body.blacklistHit, scenario.blacklistHit);
     const status = await borrower.json(`/api/borrower/applications/${application.body.applicationId}`);
     assert.equal(status.response.status, 200);
     assert.equal(status.body.application.status, scenario.applicationStatus);
+    assert.ok(status.body.application.applicantId.includes(scenario.username.replace("borrower-", "")),
+      "application applicant reference must match the server-mapped fixture identity");
     assert.equal(status.body.loan, undefined, "non-approved application must not create a loan");
+    const ownApplications = await borrower.json("/api/borrower/applications");
+    assert.ok(ownApplications.body.some(item => item.applicationId === application.body.applicationId));
+    assert.ok(ownApplications.body.every(item => item.applicantId === status.body.application.applicantId),
+      "borrower list must not include other same-tenant applicants");
     const payment = await borrower.json(`/api/borrower/applications/${application.body.applicationId}/loan`);
     assert.equal(payment.response.status, 200);
     assert.equal(payment.body, null, "non-approved application must not create a payment");
@@ -305,6 +374,12 @@ async function syntheticDecisionJourneys() {
 }
 
 async function isolationJourney(applicationId) {
+  const review = new BrowserSession();
+  await review.login("borrower-alpha-review", "alpha-review-local-only");
+  const sameTenantAccess = await review.json(`/api/borrower/applications/${applicationId}`);
+  assert.equal(sameTenantAccess.response.status, 404,
+    "another borrower in the same tenant must not read this application through borrower routes");
+
   const beta = new BrowserSession();
   await beta.login("borrower-beta", "beta-local-only");
   const session = await beta.json("/api/session");
@@ -312,6 +387,10 @@ async function isolationJourney(applicationId) {
 
   const access = await beta.json(`/api/borrower/applications/${applicationId}`);
   assert.equal(access.response.status, 404, "another tenant's application must be hidden as not found");
+
+  const betaApplications = await beta.json("/api/borrower/applications");
+  assert.ok(betaApplications.body.every(application => application.applicantId.startsWith("demo-borrower-beta-")),
+    "borrower list must contain only the signed-in applicant's records");
 
   const admin = await beta.json("/api/admin/plugins");
   assert.equal(admin.response.status, 403, "borrower identity must not use admin routes");
@@ -514,6 +593,15 @@ async function adminJourney() {
 
 if (process.env.FINBRIDGE_DEMO_E2E_SESSION_EXPIRY_ONLY === "true") {
   await sessionExpiryJourney();
+} else if (process.env.FINBRIDGE_DEMO_E2E_APPLICATION_CREATE_ONLY === "true") {
+  await borrowerApplicationCreateJourney();
+} else if (process.env.FINBRIDGE_DEMO_E2E_CONSOLE_APPLICATION_ONLY === "true") {
+  await consoleApplicationCreateJourney();
+} else if (process.env.FINBRIDGE_DEMO_E2E_RETRY_APPLICATION === "true") {
+  await retryApplicationJourney(process.env.FINBRIDGE_DEMO_APPLICATION_ID);
+} else if (process.env.FINBRIDGE_DEMO_E2E_BORROWER_ONLY === "true") {
+  const applicationId = await borrowerJourney();
+  await isolationJourney(applicationId);
 } else {
   await adminJourney();
   await oidcCallbackRejectionJourney();

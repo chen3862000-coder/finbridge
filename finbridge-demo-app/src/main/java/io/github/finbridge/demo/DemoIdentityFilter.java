@@ -12,6 +12,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+/** Revalidates OIDC membership on requests and persists only a trusted FinBridge principal. */
 public class DemoIdentityFilter extends OncePerRequestFilter {
     private final DemoIdentityMembershipRepository memberships;
     private final SecurityContextRepository contexts;

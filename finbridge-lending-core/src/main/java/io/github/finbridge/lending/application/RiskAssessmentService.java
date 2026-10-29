@@ -23,6 +23,7 @@ import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
+/** Orchestrates durable synthetic risk evaluation while keeping decisions in the lending core. */
 @Service
 public class RiskAssessmentService {
     private final LendingApplicationService applications;
@@ -43,6 +44,10 @@ public class RiskAssessmentService {
         this.clock = clock;
     }
 
+    /**
+     * Evaluates provider evidence for a tenant-owned application, reusing a completed workflow result.
+     * Provider calls are outside database transactions; interrupted provider reads may be repeated.
+     */
     public RiskAssessment evaluate(UUID tenantId, UUID applicationId, String correlationId) {
         Objects.requireNonNull(tenantId, "tenantId");
         Objects.requireNonNull(applicationId, "applicationId");
@@ -53,17 +58,20 @@ public class RiskAssessmentService {
         return evaluateApplication(tenantId, applicationId, correlationId);
     }
 
+    /** Returns the latest persisted assessment for the supplied tenant and application. */
     public RiskAssessment getLatest(UUID tenantId, UUID applicationId) {
         return assessments.findLatest(tenantId, applicationId)
                 .orElseThrow(() -> new LendingCoreException("Risk assessment was not found"));
     }
 
+    /** Returns all persisted assessment attempts for a tenant-owned application. */
     public List<RiskAssessment> getAll(UUID tenantId, UUID applicationId) {
         Objects.requireNonNull(tenantId, "tenantId");
         Objects.requireNonNull(applicationId, "applicationId");
         return assessments.findAll(tenantId, applicationId);
     }
 
+    /** Resumes interrupted read-only risk workflows and reports candidate, success, and failure counts. */
     public WorkflowRecoverySummary recoverInterruptedWorkflows() {
         List<OriginationWorkflowRepository.WorkflowRecoveryCandidate> candidates =
                 workflows.interruptedRiskWorkflows();

@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="690" viewBox="0 0 1200 690" role="img" aria-labelledby="title description">
+  <title id="title">FinBridge external-provider plugin framework</title>
+  <desc id="description">Borrower and operations applications call a stable lending core. Typed risk and payment gateways connect through the FinBridge SPI to separately packaged providers. The plugin runtime discovers, isolates, routes, and manages provider versions. PostgreSQL stores workflow, tenant binding, audit, and payment ownership data. Benefits include provider-neutral core logic, independent integration releases, tenant-specific routing, and owner-pinned payment reconciliation.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10z" fill="#526579"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172b3a; }
+      .title { font-size: 26px; font-weight: 750; letter-spacing: -.4px; }
+      .subtitle { font-size: 14px; fill: #526579; }
+      .label { font-size: 12px; font-weight: 700; letter-spacing: 1.1px; fill: #526579; }
+      .box-title { font-size: 16px; font-weight: 700; }
+      .body { font-size: 13px; fill: #405567; }
+      .small { font-size: 12px; fill: #526579; }
+      .benefit-title { font-size: 14px; font-weight: 700; }
+      .benefit-body { font-size: 12px; fill: #405567; }
+      .panel { fill: #fff; stroke: #ccd7df; stroke-width: 1.5; }
+      .core { fill: #e9f2f7; stroke: #41738c; stroke-width: 2; }
+      .runtime { fill: #f0ecfb; stroke: #7562a8; stroke-width: 1.7; }
+      .risk { fill: #eaf5f0; stroke: #40846c; stroke-width: 1.6; }
+      .payment { fill: #fff2e5; stroke: #c17a31; stroke-width: 1.6; }
+      .external { fill: #fff; stroke: #a7b6c1; stroke-width: 1.4; }
+      .line { fill: none; stroke: #526579; stroke-width: 2; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #8a7ab5; stroke-width: 1.6; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1198" height="688" rx="20" fill="#f5f8fa" stroke="#d7e0e6"/>
+  <text x="36" y="46" class="title">A stable lending core. Integrations that evolve independently.</text>
+  <text x="36" y="72" class="subtitle">Provider implementations live outside the host and meet the platform at versioned, typed contracts.</text>
+
+  <text x="36" y="113" class="label">APPLICATIONS</text>
+  <rect x="36" y="130" width="178" height="78" rx="12" class="panel"/>
+  <text x="54" y="160" class="box-title">Borrower / Console</text>
+  <text x="54" y="184" class="body">Authenticated API</text>
+
+  <path d="M214 169 H250" class="line"/>
+  <rect x="256" y="122" width="278" height="210" rx="14" class="core"/>
+  <text x="278" y="153" class="label">STABLE HOST</text>
+  <text x="278" y="183" class="box-title">Lending Core</text>
+  <text x="278" y="208" class="body">Workflow, domain rules, decisions</text>
+  <text x="278" y="230" class="body">Exact money and durable state</text>
+  <rect x="278" y="254" width="105" height="48" rx="9" class="risk"/>
+  <text x="294" y="275" class="box-title" style="font-size:13px">Risk Gateway</text>
+  <text x="294" y="292" class="small">typed evidence</text>
+  <rect x="397" y="254" width="115" height="48" rx="9" class="payment"/>
+  <text x="411" y="275" class="box-title" style="font-size:13px">Payment Gateway</text>
+  <text x="411" y="292" class="small">owned effects</text>
+
+  <path d="M534 278 H579" class="line"/>
+  <rect x="586" y="132" width="212" height="187" rx="14" class="runtime"/>
+  <text x="608" y="162" class="label">PLUGIN RUNTIME</text>
+  <text x="608" y="194" class="box-title">Plugin Framework</text>
+  <text x="608" y="220" class="body">Discover external JARs</text>
+  <text x="608" y="242" class="body">Isolate private dependencies</text>
+  <text x="608" y="264" class="body">Route tenant capabilities</text>
+  <text x="608" y="286" class="body">Activate, drain, upgrade, rollback</text>
+
+  <path d="M798 190 H842" class="dashed"/>
+  <path d="M798 256 H842" class="dashed"/>
+  <text x="817" y="171" class="small">typed SPI</text>
+  <rect x="849" y="113" width="315" height="216" rx="14" class="panel"/>
+  <text x="871" y="143" class="label">EXTERNAL PROVIDER JARS</text>
+  <rect x="872" y="161" width="125" height="59" rx="10" class="risk"/>
+  <text x="889" y="185" class="box-title" style="font-size:14px">Risk providers</text>
+  <text x="889" y="205" class="small">score · blacklist · fraud</text>
+  <rect x="1015" y="161" width="126" height="59" rx="10" class="payment"/>
+  <text x="1030" y="185" class="box-title" style="font-size:14px">Payment providers</text>
+  <text x="1030" y="205" class="small">disburse · reconcile</text>
+  <text x="872" y="250" class="body">Build and version independently</text>
+  <text x="872" y="274" class="body">Not linked to host runtime classpath</text>
+  <text x="872" y="301" class="small">Trusted in-process code; class loading is not sandboxing</text>
+
+  <path d="M395 332 V370" class="line"/>
+  <rect x="256" y="376" width="278" height="60" rx="12" class="panel"/>
+  <text x="278" y="401" class="box-title" style="font-size:14px">PostgreSQL control + lending state</text>
+  <text x="278" y="421" class="small">workflows · bindings · audit · payment owner/version</text>
+
+  <text x="36" y="493" class="label">FRAMEWORK BENEFITS</text>
+  <rect x="36" y="510" width="268" height="115" rx="12" class="panel"/>
+  <text x="56" y="542" class="benefit-title">Core stays provider-neutral</text>
+  <text x="56" y="568" class="benefit-body">Business policy depends on typed</text>
+  <text x="56" y="587" class="benefit-body">contracts, not vendor implementations.</text>
+
+  <rect x="322" y="510" width="268" height="115" rx="12" class="panel"/>
+  <text x="342" y="542" class="benefit-title">Integrations release separately</text>
+  <text x="342" y="568" class="benefit-body">Add or update an external provider JAR</text>
+  <text x="342" y="587" class="benefit-body">without embedding it in the host.</text>
+
+  <rect x="608" y="510" width="268" height="115" rx="12" class="panel"/>
+  <text x="628" y="542" class="benefit-title">Route by tenant and capability</text>
+  <text x="628" y="568" class="benefit-body">Different tenants can select provider</text>
+  <text x="628" y="587" class="benefit-body">versions for the same integration point.</text>
+
+  <rect x="894" y="510" width="270" height="115" rx="12" class="panel"/>
+  <text x="914" y="542" class="benefit-title">Keep ownership through change</text>
+  <text x="914" y="568" class="benefit-body">Reconciliation follows the original payment</text>
+  <text x="914" y="587" class="benefit-body">provider even after future routing switches.</text>
+
+  <text x="36" y="660" class="small">Single-host educational demo · synthetic providers and data · not a production security boundary</text>
+</svg>

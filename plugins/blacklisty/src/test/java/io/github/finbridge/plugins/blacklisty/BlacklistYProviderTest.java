@@ -17,6 +17,8 @@ class BlacklistYProviderTest {
         BlacklistYProvider provider = new BlacklistYProvider();
         assertTrue(((BlacklistValue) provider.query(request("demo-blacklisted"), context())
                 .value()).hit());
+        assertTrue(((BlacklistValue) provider.query(request("demo-borrower-alpha-blacklist-self"), context())
+                .value()).hit());
         assertFalse(((BlacklistValue) provider.query(request("demo-clear"), context())
                 .value()).hit());
         assertEquals(io.github.finbridge.spi.risk.RiskDataType.BLACKLIST, provider.supportedType());

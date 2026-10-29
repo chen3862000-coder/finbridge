@@ -195,6 +195,15 @@ class DomainStateTest {
                 AssessmentStatus.PENDING, null, null, null, null, List.of(), List.of(),
                 "policy-1", created, null);
         assertEquals(AssessmentStatus.PENDING, pending.status());
+        RiskAssessment unavailableReview = new RiskAssessment(assessmentId, applicationId, tenantId,
+                AssessmentStatus.COMPLETED, null, null, null, AssessmentDecision.REVIEW,
+                List.of("MANDATORY_RISK_DATA_UNAVAILABLE"), List.of(), "policy-1", created,
+                created.plusSeconds(1));
+        assertEquals(AssessmentDecision.REVIEW, unavailableReview.decision());
+        assertThrows(IllegalArgumentException.class, () -> new RiskAssessment(assessmentId,
+                applicationId, tenantId, AssessmentStatus.COMPLETED, null, null, null,
+                AssessmentDecision.APPROVE, List.of("MANDATORY_RISK_DATA_UNAVAILABLE"), List.of(),
+                "policy-1", created, created.plusSeconds(1)));
         assertThrows(IllegalArgumentException.class, () -> new RiskAssessment(assessmentId,
                 applicationId, tenantId, AssessmentStatus.PENDING, 1001, null, null, null,
                 List.of(), List.of(), "policy-1", created, null));

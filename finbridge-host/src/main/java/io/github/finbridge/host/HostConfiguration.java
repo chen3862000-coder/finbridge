@@ -52,6 +52,7 @@ public class HostConfiguration {
     }
 
     @Bean
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
     public org.springframework.boot.ApplicationRunner m5RecoveryApplicationRunner(
             PluginLifecycleManager lifecycle, PluginRecoveryRunner recovery) {
         return arguments -> {

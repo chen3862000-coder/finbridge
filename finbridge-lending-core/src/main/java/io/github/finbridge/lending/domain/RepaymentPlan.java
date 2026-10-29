@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+/** Immutable repayment schedule that receives due dates only when disbursement is confirmed. */
 public record RepaymentPlan(UUID planId, UUID loanId, UUID tenantId, BigDecimal totalPrincipal,
                            BigDecimal totalInterest, BigDecimal totalRepayable,
                            int installmentCount, RepaymentPlanStatus status, Instant createdAt,
@@ -31,6 +32,7 @@ public record RepaymentPlan(UUID planId, UUID loanId, UUID tenantId, BigDecimal 
         }
     }
 
+    /** Activates a pending plan and anchors monthly due dates to the actual disbursement date. */
     public RepaymentPlan activate(Instant at, LocalDate disbursementDate) {
         Objects.requireNonNull(at, "at");
         Objects.requireNonNull(disbursementDate, "disbursementDate");

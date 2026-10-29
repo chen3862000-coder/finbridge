@@ -2,33 +2,122 @@
 
 **One Core. Multiple Providers. Zero Core Changes.**
 
-FinBridge is a synthetic, multi-tenant lending and financial integration platform. M1-M6 implementation and the ADR-014 local authenticated borrower demo layer are present. M7 documentation and portfolio release work remains in progress; the demo is not production-ready.
+FinBridge is an educational, synthetic lending-platform demonstration built around an external-provider plugin framework. A stable lending core calls independently packaged risk and payment providers through a typed SPI. The runtime discovers provider JARs, isolates provider-private dependencies, routes capabilities by tenant, and manages activation, draining, upgrades, and rollback without linking concrete providers into the host.
 
-Start with the [v2 architecture proposal](docs/architecture/m0-proposal-v2.md), then review the 13 architecture topics: [System Overview](docs/architecture/01-system-overview.md), [Lending Domain Model](docs/architecture/02-lending-domain-model.md), [Loan Origination Workflow](docs/architecture/03-loan-origination-workflow.md), [Risk Gateway](docs/architecture/04-risk-decision-and-data-gateway.md), [Payment and Disbursement](docs/architecture/05-payment-gateway-and-disbursement.md), [Repayment Plan](docs/architecture/06-repayment-plan-design.md), [SPI Design](docs/architecture/02-spi-contract-design.md), [ClassLoader Isolation](docs/architecture/03-classloader-isolation.md), [Plugin Lifecycle](docs/architecture/04-plugin-lifecycle.md), [Tenant Routing](docs/architecture/10-multi-tenant-routing.md), [Transaction Consistency](docs/architecture/11-transaction-consistency.md), [Security and Reliability](docs/architecture/12-security-reliability-observability.md), and [Production Evolution](docs/architecture/13-production-evolution.md). The [v1 proposal](docs/architecture/m0-proposal.md) is superseded history. The numbered filenames for SPI/classloader/lifecycle retain their original paths; the proposal's documentation plan links to those paths.
+![FinBridge plugin framework: a stable lending core connects through typed gateways and SPI contracts to independently packaged, tenant-routed risk and payment providers.](docs/architecture/finbridge-plugin-framework.svg)
 
-Contributor and evidence material: [getting started](docs/guides/getting-started.md), [borrower demo usage](docs/guides/borrower-demo-usage.md), [architecture map](docs/guides/architecture-map.md), [create a provider](docs/guides/create-provider.md), [lifecycle operations](docs/guides/plugin-lifecycle-operations.md), [testing and evidence](docs/guides/testing-and-evidence.md), [demo walkthroughs](docs/demos/), and the [portfolio case study](docs/portfolio/case-study.md). Walkthroughs distinguish live HTTP evidence from module tests; class-loader isolation is verified by integration tests rather than a separate browser demo.
+The framework keeps business policy in the core while provider implementations evolve independently. Add or upgrade a compatible provider at the integration boundary rather than embedding provider-specific code in lending workflows. Persisted payment ownership keeps reconciliation tied to the provider version that began the operation, even when future tenant routing changes.
 
-Build and run the quality gates using JDK 21: `./mvnw --batch-mode --no-transfer-progress clean verify`. The recorded Java 21 gate passed for the 17-module reactor with 262 tests, zero PMD violations, zero SpotBugs findings, and all production JaCoCo thresholds met. M1 packages independent provider JARs under their plugin module `target/` directories; the host composition artifact has no concrete provider dependency.
+**Why the plugin design matters:**
 
-Coding-agent constraints and blocking quality gates are documented in [`AGENTS.md`](AGENTS.md) and [`docs/quality/quality-gates.md`](docs/quality/quality-gates.md). Before approving M0, review the M0-specific coverage behavior: isolated spike Java sources are deliberately not product modules, so the product coverage floor is enforced when M1 modules and their tests are added rather than used to gate M0 spikes.
+- **Keep the core provider-neutral:** typed SPI contracts separate lending decisions and workflows from provider implementations.
+- **Evolve integrations independently:** providers are assembled as external JARs and are absent from the host runtime classpath.
+- **Route by tenant and capability:** different tenants can bind risk or payment capabilities to different provider versions.
+- **Manage change safely:** lifecycle controls drain invocations and support upgrade/rollback; unresolved payment work retains its original provider owner.
 
-All providers and business data will be synthetic. No real payment, credit bureau, or customer data integrations are intended.
+See [Create a Synthetic Provider](docs/guides/create-provider.md), [Plugin Lifecycle](docs/architecture/04-plugin-lifecycle.md), and [Tenant Routing](docs/architecture/10-multi-tenant-routing.md) for implementation details.
 
-## Authenticated Local Demo
+This is not a production lending, underwriting, identity, or payment system. All applicants, tenants, decisions, transactions, and providers are synthetic. Plugin class-loader isolation is not a sandbox: plugins execute as trusted code in the host process. The runtime is designed for one host process. Do not use real customer data, credentials, or provider integrations.
 
-The approved M7 local demo stack runs PostgreSQL, the runnable Spring API, Keycloak OIDC, the Console, and an HTTPS reverse proxy. The borrower page is part of the Console; there is no separate API-client container. Generate a development-only self-signed certificate/trust store, then start the services:
+## What It Demonstrates
 
-```bash
-./deploy/generate-local-tls.sh
-docker compose up
+- A modular Java 21 application with a stable lending core and provider-neutral SPI.
+- External plugin JAR discovery, class-loader isolation, tenant capability routing, lifecycle operations, and rollback.
+- Durable application, risk, origination, repayment, and disbursement workflows backed by PostgreSQL.
+- Exact decimal amounts, idempotent application/payment claims, immutable payment-provider ownership, and reconciliation of ambiguous outcomes.
+- A local React Console and Spring API secured by Keycloak OIDC Authorization Code + PKCE, server-side sessions, CSRF protection, and server-side issuer/subject-to-tenant membership mapping.
+- Synthetic borrower and administrator journeys runnable with Docker Compose.
+
+## Quick Start
+
+### Requirements
+
+- JDK 21
+- Docker with Docker Compose
+- Node.js and npm for frontend checks and the optional HTTP E2E suite
+- OpenSSL for generating a local-only TLS certificate
+
+Build and run the Java quality gates:
+
+```sh
+./mvnw --batch-mode --no-transfer-progress clean verify
 ```
 
-Trust `deploy/tls/localhost.crt` in the local browser/OS trust store, then open `https://localhost:8443/borrower`. The complete account matrix and step-by-step borrower/admin journeys are in [Borrower Demo Usage](docs/guides/borrower-demo-usage.md). Borrower identities map server-side to demo tenants and fixed synthetic applicant references. The browser never chooses a tenant or risk outcome. The admin account can use `/console` for internal plugin controls.
+Start the local demo:
 
-For automated authenticated HTTP checks after the cluster is healthy, run `FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e` from `frontend/`. The script uses the locally generated self-signed certificate only for this demo and checks OIDC/PKCE login, invalid state/code callback denial, exact decimal application submission, seeded server-mapped approval/review/rejection identities, origination, repayment-plan lookup, synthetic disbursement and payment reconciliation, tenant-specific routing, external plugin install, AlphaPay binding rollback, logout, tenant isolation, and borrower/admin role separation. For deterministic idle-session expiry, start Compose with `FINBRIDGE_DEMO_SESSION_TIMEOUT=5s` and run `FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true FINBRIDGE_DEMO_E2E_SESSION_EXPIRY_ONLY=true npm run test:e2e` from `frontend/`; the normal default is 30 minutes. Risk outcome is selected by the seeded identity mapping; the borrower request has no scenario field. The script sets `NODE_TLS_REJECT_UNAUTHORIZED=0`; never use that setting outside this local-only test.
+```sh
+./deploy/generate-local-tls.sh
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+```
 
-PostgreSQL is available on `localhost:5432` with database/user `finbridge`; the default password is `finbridge-local-only` for local use only. Override settings with a root `.env` file based on `.env.example`. Flyway baselines the existing synthetic schema at V2 and applies V3 identity membership. Existing local volumes are not overwritten. To reset all local demo data and trigger a clean import, use `docker compose down -v` only when intentionally discarding it.
+Trust the generated `deploy/tls/localhost.crt` in your local browser/OS trust store, then open <https://localhost:8443/borrower>. The certificate and its private key are local development fixtures and must not be used elsewhere.
 
-The application image packages providers only as external plugin JAR fixtures under `/app/plugins`; they are not added to the API host classpath. The opt-in Compose demo bootstrap registers/activates and binds synthetic risk/payment fixtures for seeded tenants. This stack is local demo infrastructure only: its passwords and self-signed trust root are not production credentials or certificates. Never use real borrower data or providers here. `FINBRIDGE_DEMO_BOOTSTRAP_PLUGINS` defaults to false and is enabled only by Compose. The demo app baselines an existing schema at Flyway V2 and applies V3. Artifact checksums are immutable: rebuilding changed plugin JARs against an existing volume fails closed rather than replacing registered artifacts. To reinitialize this synthetic-only local database after rebuilding artifacts, intentionally discard its volume with `docker compose down -v`, then restart the stack.
+Use the [local demo guide](docs/guides/borrower-demo-usage.md) for seeded synthetic accounts and the full borrower/admin walkthrough. Borrower pages are scoped to the signed-in synthetic applicant; internal Console views are tenant-wide. Tenant identity and borrower ownership are derived on the server, not from caller-selected request fields.
 
-Stop services while preserving data with `docker compose down`; follow logs with `docker compose logs -f`. Full demo startup may take several minutes on first build.
+Stop the stack and preserve its local data with:
+
+```sh
+docker compose down
+```
+
+The demo uses seeded local-only passwords and a default local database password. They are public fixtures, not secrets suitable for reuse. Never expose this stack to an untrusted network. Compose binds demo services to localhost. To intentionally discard all synthetic database data and volumes, use `docker compose down -v`.
+
+## Run Checks
+
+Java checks run from the repository root with JDK 21:
+
+```sh
+./mvnw --batch-mode --no-transfer-progress clean verify
+```
+
+Frontend checks run from `frontend/`:
+
+```sh
+npm ci
+npm run build
+npm test
+npm audit --omit=dev
+```
+
+The audit command checks production dependencies only. The authenticated live HTTP suite targets the local Compose stack and deliberately disables Node TLS verification for its generated self-signed certificate. Run it only against that isolated local demo:
+
+```sh
+FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e
+```
+
+See [Testing and Evidence](docs/guides/testing-and-evidence.md) for scope and evidence boundaries.
+
+## Architecture and Guides
+
+- [FinBridge Through a Domain-Driven Design Lens](docs/architecture/domain-driven-design.md)
+- [System overview](docs/architecture/01-system-overview.md)
+- [Lending domain model](docs/architecture/02-lending-domain-model.md)
+- [SPI contract design](docs/architecture/02-spi-contract-design.md)
+- [Plugin class-loader isolation](docs/architecture/03-classloader-isolation.md)
+- [Origination workflow](docs/architecture/03-loan-origination-workflow.md)
+- [Risk gateway](docs/architecture/04-risk-decision-and-data-gateway.md)
+- [Plugin lifecycle](docs/architecture/04-plugin-lifecycle.md)
+- [Payment and disbursement](docs/architecture/05-payment-gateway-and-disbursement.md)
+- [Repayment plans](docs/architecture/06-repayment-plan-design.md)
+- [Tenant routing](docs/architecture/10-multi-tenant-routing.md)
+- [Transaction consistency](docs/architecture/11-transaction-consistency.md)
+- [Security, reliability, and observability](docs/architecture/12-security-reliability-observability.md)
+- [Production evolution and limitations](docs/architecture/13-production-evolution.md)
+- [Getting started](docs/guides/getting-started.md)
+- [Create a provider](docs/guides/create-provider.md)
+- [Plugin lifecycle operations](docs/guides/plugin-lifecycle-operations.md)
+- [Local borrower demo and default tenant capability bindings](docs/guides/borrower-demo-usage.md)
+- [Demo walkthroughs](docs/demos/)
+- [Architecture decision records](docs/adr/README.md)
+
+The active design baseline is [M0 proposal v2](docs/architecture/m0-proposal-v2.md), together with accepted ADRs. [M0 proposal v1](docs/architecture/m0-proposal.md) is superseded historical material. Experimental M0 spikes are isolated under `m0-spikes/` and are not product modules.
+
+## Project Status and Limitations
+
+The repository includes implementation milestones M1-M6 and the approved M7 local authenticated demo layer. The demo and its identity configuration are for local evaluation only. Production identity selection, threat modeling, deployment hardening, secrets management, multi-host guarantees, real risk underwriting, and real payment settlement are out of scope. See the [security architecture](docs/architecture/12-security-reliability-observability.md), [production evolution notes](docs/architecture/13-production-evolution.md), and [portfolio case study](docs/portfolio/case-study.md) for verified evidence and remaining limits.
+
+## License
+
+This project is distributed under the MIT License. See [LICENSE](LICENSE). Third-party dependencies and assets remain subject to their own licenses.

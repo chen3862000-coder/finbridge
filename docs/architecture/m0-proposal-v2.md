@@ -20,12 +20,11 @@ The repository was inspected before redesign. It began with a placeholder README
 
 | Check | Finding / decision |
 |---|---|
-| JDK | Microsoft OpenJDK 21.0.12.1 is installed. Maven 3.10.0 successfully starts when `JAVA_HOME` is set to it. JDK 21 is fixed for builds and deployment. |
-| Default environment | The shell currently defaults to JDK 27; developer commands, Maven toolchain/configuration, CI, and containers must explicitly select Java 21. |
-| Maven Wrapper | Not present yet; M0 build spike will add and verify a pinned wrapper. |
-| Docker | Docker Compose CLI v5.6.0 and Docker daemon 29.9.1 are available; no project Compose stack exists or has been run. |
-| Spring Boot | Proposed stable 3.5.x release on Java 21. Select and pin the exact supported patch during the build spike after checking its release/support status. |
-| Plugin loading / class identity | No code existed when initially inspected. Results must be recorded from the M0 real-JAR spike below; no result is assumed. |
+| JDK | Java 21 is the required build and runtime version. The Maven Enforcer rule and CI workflow verify this requirement. |
+| Maven Wrapper | The repository includes a pinned Maven Wrapper; use `./mvnw` rather than a machine-installed Maven version. |
+| Docker | Docker Compose is used for the optional local PostgreSQL, OIDC, API, and Console demo. Run `docker compose config --quiet` before startup. |
+| Spring Boot | The implementation pins Spring Boot dependencies in the root Maven build; review the build files for the exact version. |
+| Plugin loading / class identity | See the M0 real-JAR spike results and current runtime integration tests below; the host and providers share SPI types while plugin-private classes are isolated. |
 
 ## 3. Scope, Non-Goals, and Invariants
 

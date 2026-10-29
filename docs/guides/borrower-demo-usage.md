@@ -21,11 +21,11 @@ Wait for PostgreSQL, Keycloak, and `demo-api` to report healthy. The Console and
 
 ## Borrower Journeys
 
-1. Sign in as `borrower-alpha` / `alpha-local-only` for the standard approval path. The identity maps server-side to the alpha tenant; the browser does not submit a tenant ID.
+1. Sign in as `borrower-alpha` / `alpha-local-only` for the standard approval path. The identity maps server-side to the alpha tenant and its own synthetic applicant reference; the borrower page lists only that account's applications. The browser does not submit a tenant ID or applicant ID.
 2. Enter an amount such as `1234.56`, select product/currency/term, and submit. The UI obtains a CSRF token and generates an idempotency key.
 3. Review the application and risk result. Application amount is transported as an exact decimal string. Approval alone does not create an active loan.
-4. For fixed synthetic review/rejection outcomes, sign out and use the separately seeded `borrower-alpha-review` / `alpha-review-local-only`, `borrower-alpha-blacklist` / `alpha-blacklist-local-only`, or `borrower-alpha-fraud` / `alpha-fraud-local-only` account. Each identity is server-mapped to its fixed synthetic applicant reference. The application form does not select the outcome.
-5. Sign in as `borrower-beta` / `beta-local-only` to observe a separate mapped tenant. Alpha application IDs remain inaccessible to beta.
+4. For fixed synthetic review/rejection outcomes, sign out and use `borrower-alpha-review` / `alpha-review-local-only` (score 640 -> manual review), `borrower-alpha-blacklist` / `alpha-blacklist-local-only` (blacklist hit -> reject), or `borrower-alpha-fraud` / `alpha-fraud-local-only` (critical fraud -> reject). Each identity is server-mapped to its fixed synthetic applicant reference. The application form does not select the outcome.
+5. Sign in as `borrower-beta` / `beta-local-only` to observe a separate mapped tenant and only Beta's borrower application list. Alpha application IDs remain inaccessible to beta.
 6. Use the automated E2E for the full successful lifecycle, because the simple borrower page demonstrates apply/status while the script also calls the authenticated origination, repayment, payment, and reconciliation routes:
 
 ```sh
@@ -35,7 +35,49 @@ FINBRIDGE_DEMO_ALLOW_INSECURE_TLS=true npm run test:e2e
 
 ## Admin Console
 
-Open `https://localhost:8443/console` and sign in as `demo-admin` / `admin-local-only`. Plugin registry, tenant routing, install, upgrade, rollback, and lifecycle actions require the mapped admin identity and CSRF tokens. The borrower accounts cannot access these routes, and the admin account cannot access borrower routes.
+Open `https://localhost:8443/console` and sign in as `demo-admin` / `admin-local-only`. Plugin registry, tenant routing, install, upgrade, rollback, and lifecycle actions require the mapped admin identity and CSRF tokens. The internal Console is tenant-wide and can show applications from all borrowers in its mapped tenant; applicant references are displayed so records are attributable. The borrower page and its APIs are scoped to the signed-in borrower. Borrower accounts cannot access admin routes, and the admin account cannot access borrower routes.
+
+### Demo Tenant Capability Bindings
+
+The demo has two synthetic tenants, `DEMO_ALPHA` and `DEMO_BETA`. The tenant rows are seeded by `V1__lending_core.sql`. Plugin artifacts and tenant routes are initialized separately: Flyway creates the control-plane tables, while the optional `DemoPluginBootstrap` application runner installs available fixture JARs, activates them, and creates missing capability bindings at startup.
+
+Compose enables this runner with `FINBRIDGE_DEMO_BOOTSTRAP_PLUGINS=true` and supplies the plugin directory at `/app/plugins`. The default in `application.yml` is `false`, so running the app outside the supplied Compose configuration does not automatically bootstrap plugin routes.
+
+The bootstrap fixture list currently specifies these mappings for each tenant:
+
+| Capability | Provider | Artifact identity |
+|---|---|---|
+| `DISBURSE` | AlphaPay | `alphapay` 1.0.0 |
+| `QUERY_STATUS` | AlphaPay | `alphapay` 1.0.0 |
+| `CREDIT_SCORE` | CreditScoreX | `creditscorex` 1.0.0 |
+| `BLACKLIST` | BlacklistY | `blacklisty` 1.0.0 |
+
+That fixture list is the startup default, not an unconditional reset of routing. Bootstrap only binds a fixture when its artifact is registered and that tenant does not already have a binding for the capability. It does not overwrite an existing route. It also skips fixture JARs that are not present in the plugin directory. Other artifacts packaged in the demo image, such as BetaPay, FraudSignalZ, and newer AlphaPay versions, are available for lifecycle demonstrations but are not part of this default fixture mapping. In particular, FraudSignalZ is not automatically bound to `FRAUD_SIGNAL` in this default setup.
+
+To inspect effective routes, sign in as the demo administrator, open **Tenant Routing** in the Console, and select `DEMO_ALPHA` or `DEMO_BETA`. The page reads persisted PostgreSQL bindings, so it shows the effective routes after any manual changes, not just the bootstrap defaults. The read-only admin endpoint is `GET /api/admin/plugins/bindings?tenantId=<tenant-uuid>`.
+
+The table `tenant_plugin_bindings` is defined in `V2__plugin_control_plane.sql`. It is populated by the bootstrap runner or by an administrator, not by a SQL seed in the migration. For local inspection, this read-only query shows the persisted route and revision for each seeded tenant:
+
+```sql
+SELECT tenants.tenant_code,
+       bindings.capability,
+       bindings.plugin_id,
+       bindings.plugin_version,
+       bindings.revision
+FROM tenant_plugin_bindings AS bindings
+JOIN tenants USING (tenant_id)
+ORDER BY tenants.tenant_code, bindings.capability;
+```
+
+Run the query against the local Compose database with:
+
+```sh
+docker compose exec -T postgres psql -U finbridge -d finbridge
+```
+
+Then paste the `SELECT` above at the `psql` prompt. The expected fresh-bootstrap result is four bindings for each tenant (eight total). If the result differs, check whether bootstrap was enabled, whether the three fixture JARs were present, and whether routes already existed before startup. Bootstrap intentionally preserves existing bindings.
+
+An administrator can change a route in **Tenant Routing** by selecting a tenant, capability, and active provider that advertises that capability, then committing with the displayed expected revision. A stale revision is rejected. Changes affect future calls; an existing payment continues to be reconciled by the provider version that originally owned it. See [Plugin Lifecycle Operations](plugin-lifecycle-operations.md) for upgrade, rollback, drain, and unload behavior.
 
 Do not install arbitrary files or real provider credentials. Only allowlisted synthetic artifacts packaged outside the backend classpath are available in the local runtime.
 
@@ -47,7 +89,9 @@ Stop services but preserve synthetic data with:
 docker compose down
 ```
 
-The control plane pins artifact checksums. If a rebuilt image contains different plugin bytes, the API refuses stale database identities. Only when intentionally discarding the local synthetic database, reset its volume with `docker compose down -v`, then repeat TLS generation and startup.
+The control plane pins artifact checksums. Plugin JARs use a fixed Maven output timestamp so identical source builds produce stable artifact bytes. When upgrading plugin contents, the host still correctly rejects old registered identities. To intentionally refresh local plugins, run `scripts/refresh-local-demo.sh --confirm-data-reset`; the script first backs up the current synthetic database under ignored `local-backups/`, then removes/recreates Compose volumes, rebuilds/re-registers providers, and verifies active artifacts, tenant bindings, and the borrower route. The refresh resets local records, but the SQL backup is retained. The explicit confirmation flag is required. For a manual reset, use `docker compose down -v`, then repeat TLS generation and startup.
+
+The refresh script also runs the full authenticated E2E suite. It validates standard approval, review, blacklist/fraud rejection, plugin install/rollback, tenant-specific payment routing, and tenant isolation after the providers have been restored.
 
 ## Boundaries
 

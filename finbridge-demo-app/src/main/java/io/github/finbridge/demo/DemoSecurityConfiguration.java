@@ -77,7 +77,10 @@ public class DemoSecurityConfiguration {
         csrf.setCookieCustomizer(cookie -> cookie.secure(true).sameSite("Lax").path("/"));
         DefaultOAuth2AuthorizationRequestResolver requests = new DefaultOAuth2AuthorizationRequestResolver(
                 registrations, "/oauth2/authorization");
-        requests.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
+        requests.setAuthorizationRequestCustomizer(request -> {
+            OAuth2AuthorizationRequestCustomizers.withPkce().accept(request);
+            request.additionalParameters(parameters -> parameters.put("prompt", "login"));
+        });
         http.securityContext(context -> context.securityContextRepository(contexts))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/", "/borrower", "/console", "/src/**", "/@vite/**", "/@react-refresh",

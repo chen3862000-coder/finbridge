@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
+/** Reads and maintains demo-only issuer/subject memberships used to derive tenant identity. */
 public class DemoIdentityMembershipRepository {
     private final JdbcTemplate jdbc;
 
@@ -14,6 +15,7 @@ public class DemoIdentityMembershipRepository {
         jdbc = new JdbcTemplate(dataSource);
     }
 
+    /** Returns an enabled identity mapping; unmapped or disabled subjects remain unauthenticated. */
     public Optional<Membership> findEnabled(String issuer, String subject) {
         return jdbc.query("SELECT principal_subject, tenant_id, admin FROM demo_identity_memberships "
                         + "WHERE issuer = ? AND subject = ? AND enabled = TRUE",
@@ -22,6 +24,7 @@ public class DemoIdentityMembershipRepository {
                 issuer, subject).stream().findFirst();
     }
 
+    /** Inserts or refreshes a synthetic local-demo identity membership. */
     public void assignDemoMembership(String issuer, String subject, String principalSubject,
             UUID tenantId, boolean admin) {
         jdbc.update("INSERT INTO demo_identity_memberships (issuer, subject, principal_subject, tenant_id, "
