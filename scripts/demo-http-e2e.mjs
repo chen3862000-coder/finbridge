@@ -323,11 +323,14 @@ async function sessionExpiryJourney() {
 async function syntheticDecisionJourneys() {
   const scenarios = [
     { username: "borrower-alpha-review", password: "alpha-review-local-only",
-      decision: "REVIEW", applicationStatus: "MANUAL_REVIEW", creditScore: 640, blacklistHit: false },
+      applicantId: "demo-borrower-alpha-review-self", decision: "REVIEW",
+      applicationStatus: "MANUAL_REVIEW", creditScore: 640, blacklistHit: false },
     { username: "borrower-alpha-blacklist", password: "alpha-blacklist-local-only",
-      decision: "REJECT", applicationStatus: "REJECTED", creditScore: 720, blacklistHit: true },
+      applicantId: "demo-borrower-alpha-blacklist-self", decision: "REJECT",
+      applicationStatus: "REJECTED", creditScore: 720, blacklistHit: true },
     { username: "borrower-alpha-fraud", password: "alpha-fraud-local-only",
-      decision: "REJECT", applicationStatus: "REJECTED", creditScore: 720, blacklistHit: false },
+      applicantId: "demo-borrower-alpha-critical-fraud-self", decision: "REJECT",
+      applicationStatus: "REJECTED", creditScore: 720, blacklistHit: false },
   ];
   for (const scenario of scenarios) {
     const borrower = new BrowserSession();
@@ -359,7 +362,7 @@ async function syntheticDecisionJourneys() {
     const status = await borrower.json(`/api/borrower/applications/${application.body.applicationId}`);
     assert.equal(status.response.status, 200);
     assert.equal(status.body.application.status, scenario.applicationStatus);
-    assert.ok(status.body.application.applicantId.includes(scenario.username.replace("borrower-", "")),
+    assert.equal(status.body.application.applicantId, scenario.applicantId,
       "application applicant reference must match the server-mapped fixture identity");
     assert.equal(status.body.loan, undefined, "non-approved application must not create a loan");
     const ownApplications = await borrower.json("/api/borrower/applications");

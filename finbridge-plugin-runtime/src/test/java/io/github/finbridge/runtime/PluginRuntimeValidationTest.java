@@ -66,7 +66,8 @@ class PluginRuntimeValidationTest {
                 getClass().getClassLoader(), 1);
         assertThrows(PluginLoadException.class,
                 () -> invalidRuntime.install("candidate.jar", context()));
-        assertThrows(PluginLoadException.class, () -> new PluginDiscovery(null)
+        assertThrows(PluginLoadException.class, () -> new PluginDiscovery(null,
+                new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1)))
                 .createLoader(pluginDirectory.resolve("missing.jar")));
     }
 
@@ -91,6 +92,66 @@ class PluginRuntimeValidationTest {
         assertFalse(retention.canUnload(key));
         assertTrue(retention.canUnload(key));
         assertEquals(2, checks.get());
+    }
+
+    @Test
+    void callbackFailurePreservesCauseAndDiagnostic() throws Exception {
+        try (var executor = new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1));
+             var loader = new URLClassLoader(new URL[0], getClass().getClassLoader())) {
+            IllegalStateException cause = new IllegalStateException("fixture failure");
+            PluginLifecycleCallbackException failure = assertThrows(PluginLifecycleCallbackException.class,
+                    () -> executor.execute("initialize", loader, () -> { throw cause; }));
+            assertEquals("PLUGIN_LIFECYCLE_CALLBACK_FAILED", failure.diagnosticCode());
+            assertSame(cause, failure.getCause());
+        }
+    }
+
+    @Test
+    void callbackRuntimeRejectsClosedAndInvalidTimeoutContexts() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> new PluginLifecycleCallbackExecutor(Duration.ZERO));
+        var executor = new PluginLifecycleCallbackExecutor(Duration.ofMillis(100));
+        var loader = new URLClassLoader(new URL[0], getClass().getClassLoader());
+        try (loader) {
+            executor.close();
+            PluginLifecycleCallbackException closed = assertThrows(PluginLifecycleCallbackException.class,
+                    () -> executor.execute("initialize", loader, () -> { }));
+            assertEquals("PLUGIN_LIFECYCLE_RUNTIME_CLOSED", closed.diagnosticCode());
+        }
+    }
+
+    @Test
+    void callbackRuntimeValidatesRequiredArguments() throws Exception {
+        try (var executor = new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1));
+             var loader = new URLClassLoader(new URL[0], getClass().getClassLoader())) {
+            assertThrows(NullPointerException.class, () -> executor.execute(null, loader, () -> { }));
+            assertThrows(NullPointerException.class, () -> executor.execute("initialize", null, () -> { }));
+            assertThrows(NullPointerException.class, () -> executor.execute("initialize", loader, null));
+        }
+    }
+
+    @Test
+    void callbackWorkersAreDaemonThreadsAndFailedLoadCloseUsesClosePool() throws Exception {
+        try (var executor = new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1));
+             var loader = new URLClassLoader(new URL[0], getClass().getClassLoader())) {
+            var daemon = new java.util.concurrent.atomic.AtomicBoolean();
+            var name = new java.util.concurrent.atomic.AtomicReference<String>();
+            executor.execute("failed-load close", loader, () -> {
+                daemon.set(Thread.currentThread().isDaemon());
+                name.set(Thread.currentThread().getName());
+            });
+            assertTrue(daemon.get());
+            assertTrue(name.get().startsWith("finbridge-plugin-lifecycle-close-"));
+        }
+    }
+
+    @Test
+    void callbackExecutionRestoresCallerThreadContextLoader() throws Exception {
+        try (var executor = new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1));
+             var loader = new URLClassLoader(new URL[0], getClass().getClassLoader())) {
+            ClassLoader original = Thread.currentThread().getContextClassLoader();
+            executor.execute("initialize", loader, () -> { });
+            assertSame(original, Thread.currentThread().getContextClassLoader());
+        }
     }
 
     @Test
@@ -344,7 +405,8 @@ class PluginRuntimeValidationTest {
 
     @Test
     void discoveryValidatesRiskTypeCapabilityAndCoversAllCapabilityMappings() {
-        PluginDiscovery discovery = new PluginDiscovery(getClass().getClassLoader());
+        PluginDiscovery discovery = new PluginDiscovery(getClass().getClassLoader(),
+                new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1)));
         for (RiskDataType type : RiskDataType.values()) {
             Capability capability = discovery.capabilityFor(type);
             RiskFixture provider = new RiskFixture(type, capability);
@@ -368,7 +430,8 @@ class PluginRuntimeValidationTest {
 
     @Test
     void discoveryRejectsUnsupportedSpiMajorAndMismatchedCapabilities() {
-        PluginDiscovery discovery = new PluginDiscovery(getClass().getClassLoader());
+        PluginDiscovery discovery = new PluginDiscovery(getClass().getClassLoader(),
+                new PluginLifecycleCallbackExecutor(Duration.ofSeconds(1)));
         PluginDescriptor descriptor = new PluginDescriptor("pay", "provider", "1", "2.0",
                 PluginType.PAYMENT, Set.of(Capability.DISBURSE), "Payment", "Fixture");
         assertThrows(PluginLoadException.class, () -> discovery.validateDescriptor(descriptor, 1));

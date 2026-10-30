@@ -104,19 +104,20 @@ See [Testing and Evidence](docs/guides/testing-and-evidence.md) for scope and ev
 - [Tenant routing](docs/architecture/10-multi-tenant-routing.md)
 - [Transaction consistency](docs/architecture/11-transaction-consistency.md)
 - [Security, reliability, and observability](docs/architecture/12-security-reliability-observability.md)
-- [Production evolution and limitations](docs/architecture/13-production-evolution.md)
+    - [Production evolution and limitations](docs/architecture/13-production-evolution.md)
 - [Getting started](docs/guides/getting-started.md)
 - [Create a provider](docs/guides/create-provider.md)
 - [Plugin lifecycle operations](docs/guides/plugin-lifecycle-operations.md)
 - [Local borrower demo and default tenant capability bindings](docs/guides/borrower-demo-usage.md)
 - [Demo walkthroughs](docs/demos/)
+- [Portfolio case study and demo screenshots](docs/portfolio/case-study.md)
 - [Architecture decision records](docs/adr/README.md)
 
 The active design baseline is [M0 proposal v2](docs/architecture/m0-proposal-v2.md), together with accepted ADRs. [M0 proposal v1](docs/architecture/m0-proposal.md) is superseded historical material. Experimental M0 spikes are isolated under `m0-spikes/` and are not product modules.
 
 ## Project Status and Limitations
 
-The repository includes implementation milestones M1-M6 and the approved M7 local authenticated demo layer. The demo and its identity configuration are for local evaluation only. Production identity selection, threat modeling, deployment hardening, secrets management, multi-host guarantees, real risk underwriting, and real payment settlement are out of scope. See the [security architecture](docs/architecture/12-security-reliability-observability.md), [production evolution notes](docs/architecture/13-production-evolution.md), and [portfolio case study](docs/portfolio/case-study.md) for verified evidence and remaining limits.
+The repository includes implementation milestones M1-M6 and the approved M7 local authenticated demo layer. The demo and its identity configuration are for local evaluation only. It demonstrates selected hardened web controls but is not production-ready or a production security recommendation. Production identity selection, deployment hardening, secrets management, multi-host guarantees, real risk underwriting, and real payment settlement are out of scope. See the [security architecture](docs/architecture/12-security-reliability-observability.md), [local demo threat model](docs/security/threat-model.md), [production evolution notes](docs/architecture/13-production-evolution.md), and [portfolio case study](docs/portfolio/case-study.md) for limits and evidence.
 
 ## License
 

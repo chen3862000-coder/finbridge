@@ -1,6 +1,6 @@
 # ClassLoader Isolation: M1
 
-Each artifact load receives a closeable `PluginClassLoader`. Java platform classes and `io.github.finbridge.spi.*` are parent-first. Other classes are attempted child-first, with fallback to the parent. Thus the shared SPI interface remains the same `Class` object, while provider-private dependencies can be defined separately by each plugin loader.
+Each artifact load receives a closeable `PluginClassLoader`. Java platform classes and `io.github.finbridge.spi.*` are parent-first. Other classes, including provider implementation packages and provider-private dependencies, are attempted child-first, with fallback to the parent. Thus the shared SPI interface remains the same `Class` object, while provider implementation and private dependency classes can be defined separately by each plugin loader.
 
 The integration fixtures are compiled provider artifacts, not class-name simulations. `alphapay-v1` and `alphapay-v2` each package a helper named `io.github.finbridge.plugins.privateapi.Helper` with different behavior. Their provider implementation packages are on the test runtime so `ServiceLoader`'s service-descriptor lookup can discover them; the integration test supplies a provider-free parent loader that denies provider classes and service resources, reproducing the intended host condition. The actual helper is defined by each plugin loader.
 

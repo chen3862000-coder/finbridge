@@ -69,6 +69,24 @@ export function App() {
       .finally(() => setSessionChecked(true));
   }, []);
 
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>(".console-navigation button")];
+      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === "ArrowDown" || event.key === "ArrowRight" ? index + 1
+        : event.key === "ArrowUp" || event.key === "ArrowLeft" ? index - 1
+        : event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : -1;
+      if (index >= 0 && next >= 0) {
+        event.preventDefault();
+        const selected = buttons[(next + buttons.length) % buttons.length];
+        selected?.focus();
+        selected?.click();
+      }
+    };
+    document.addEventListener("keydown", handle);
+    return () => document.removeEventListener("keydown", handle);
+  }, []);
+
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 4200);
@@ -78,6 +96,7 @@ export function App() {
   if (!authenticated) return <SignedOutPage />;
 
   return <div className="console-shell">
+    <a className="skip-link" href="#main-content">Skip to main content</a>
     <aside className="sidebar">
       <a className="brand" href="#dashboard" onClick={() => setSection("dashboard")}>
         <span className="brand-mark"><i /><i /><i /></span>
@@ -85,9 +104,10 @@ export function App() {
       </a>
       <div className="workspace-switch"><span className="workspace-dot" /><span>AUTHENTICATED WORKSPACE</span></div>
       <div className="nav-caption">WORKSPACE</div>
-      <nav aria-label="Console sections">
-        {navigation.filter(item => isAdmin || (item.id !== "plugins" && item.id !== "routing"))
-          .map(item => <button key={item.id} className={`nav-item ${section === item.id ? "active" : ""}`}
+      <nav aria-label="Console sections" className="console-navigation">
+         {navigation.filter(item => isAdmin || (item.id !== "plugins" && item.id !== "routing"))
+          .map(item => <button key={item.id} aria-current={section === item.id ? "page" : undefined}
+          className={`nav-item ${section === item.id ? "active" : ""}`}
           onClick={() => { startTransition(() => setSection(item.id)); setSelectedApplication(null); setSelectedLoan(null); }}>
           <span className="nav-index">{item.eyebrow}</span><span>{item.title}</span>
           {item.id === "workflow" && <span className="nav-live" />}
@@ -105,7 +125,7 @@ export function App() {
           <div className="top-identity"><ConsoleIdentity /></div>
         </div>
       </header>
-      <div className="content">
+      <div id="main-content" className="content" tabIndex={-1}>
         {selectedApplication
           ? <ApplicationRecord id={selectedApplication} onBack={() => setSelectedApplication(null)}
             onInspectLoan={loanId => { setSelectedApplication(null); setSection("loans"); setSelectedLoan(loanId); }}
@@ -313,6 +333,57 @@ function ApplicationsPage({ onSelect, onCreate }: { onSelect: (id: string) => vo
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowForm(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, []);
+  useEffect(() => {
+    if (!showForm) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']");
+    dialog?.querySelector<HTMLElement>("input, select, button")?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (!dialog || event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")];
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) {
+        event.preventDefault(); focusable.at(-1)?.focus();
+      } else if (!event.shiftKey && document.activeElement === focusable.at(-1)) {
+        event.preventDefault(); focusable[0]?.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      previousFocus?.focus();
+    };
+  }, [showForm]);
+  useEffect(() => {
+    if (!showForm) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']");
+    dialog?.querySelector<HTMLElement>("input, select, button")?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (!dialog || event.key !== "Tab") return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])")];
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) {
+        event.preventDefault(); focusable.at(-1)?.focus();
+      } else if (!event.shiftKey && document.activeElement === focusable.at(-1)) {
+        event.preventDefault(); focusable[0]?.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      previousFocus?.focus();
+    };
+  }, [showForm]);
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -331,8 +402,8 @@ function ApplicationsPage({ onSelect, onCreate }: { onSelect: (id: string) => vo
   return <>
     <PageHeading kicker="ORIGINATION / INTAKE" title="Loan applications" description="Synthetic applicants, product snapshots, and persisted risk decisions." actions={<button className="button primary" onClick={() => setShowForm(true)}>＋ New application</button>} />
     <div className="filter-strip"><span className="filter-selected">All records</span><span>Recent first</span><span className="filter-count">{apps.data?.length ?? 0} records</span></div>
-    {showForm && <div className="modal-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal" onSubmit={submit}>
-      <div className="modal-head"><div><div className="kicker">NEW / SYNTHETIC</div><h2>Start an application</h2></div><button type="button" className="icon-button" aria-label="Close" onClick={() => setShowForm(false)}>×</button></div>
+    {showForm && <div className="modal-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="application-dialog-title" onSubmit={submit}>
+      <div className="modal-head"><div><div className="kicker">NEW / SYNTHETIC</div><h2 id="application-dialog-title">Start an application</h2></div><button type="button" className="icon-button" aria-label="Close" onClick={() => setShowForm(false)}>×</button></div>
       <p className="modal-copy">The authenticated tenant is selected by the host. A fresh idempotency key is generated for this submission.</p>
       <label>Applicant reference<input name="applicantId" required placeholder="synthetic-applicant-017" /></label>
       <label>Loan product<select name="productCode" required>{(products.data ?? []).map(product => <option key={product.productCode} value={product.productCode}>{product.productCode} · {product.currency} · {product.annualInterestRatePercent}% p.a.</option>)}</select></label>
@@ -353,7 +424,7 @@ function ApplicationTable({ applications, loading, error, onSelect, compact = fa
   if (error) return <div className="panel"><div className="empty"><b>Application feed unavailable</b><p>{error}</p></div></div>;
   return <section className="panel table-panel">
     {!compact && <div className="table-toolbar"><label className="search-box"><span>⌕</span><input aria-label="Filter applications" placeholder="Filter by applicant, product or status" value={query} onChange={event => setQuery(event.target.value)} /></label><span className="table-count">{filtered.length} shown</span></div>}
-    <div className="table-scroll"><table><thead><tr><th>APPLICANT / REFERENCE</th><th>PRODUCT</th><th>REQUESTED</th><th>SUBMITTED</th><th>STATUS</th><th /></tr></thead><tbody>
+    <div className="table-scroll"><table><thead><tr><th>APPLICANT / REFERENCE</th><th>PRODUCT</th><th>REQUESTED</th><th>SUBMITTED</th><th>STATUS</th><th><span className="sr-only">Open application</span></th></tr></thead><tbody>
       {filtered.map((application, index) => <tr key={application.applicationId} onClick={() => onSelect(application.applicationId)} className="click-row">
         <td><span className="applicant-cell"><span className={`row-avatar avatar-${index % 4}`}>{application.applicantId.slice(0, 2).toUpperCase()}</span><span><b>{application.applicantId}</b><small>{application.applicationId.slice(0, 8)}…</small></span></span></td>
         <td><b>{application.productCode}</b><small className="table-sub">v{application.productVersion}</small></td>
@@ -489,7 +560,9 @@ function RoutingPage({ notify }: { notify: (message: string) => void }) {
   const activeArtifacts = (artifacts.data ?? []).filter(item => item.desiredState === "ACTIVE" && item.capabilities.includes(capability));
   useEffect(() => {
     const tenant = tenants.data?.[0];
-    if (tenant && !tenantId) setTenantId(tenant.tenantId);
+    if (tenant && !tenantId) {
+      startTransition(() => setTenantId(tenant.tenantId));
+    }
   }, [tenants.data, tenantId]);
   useEffect(() => { setArtifactIdentity(""); }, [capability]);
   const submit = async (event: React.FormEvent) => {
@@ -517,7 +590,7 @@ function RoutingPage({ notify }: { notify: (message: string) => void }) {
   return <><PageHeading kicker="CONTROL PLANE / ROUTING" title="Tenant routing" description="Capability-level bindings are durable, revisioned, and affect future invocations only." actions={<div className="scope-pill"><span className="environment-dot" />ADMIN SCOPE</div>} />
     {loading || loadError ? <div className="panel"><Loading error={loadError} retry={() => { void tenants.reload(); void artifacts.reload(); void bindings.reload(); }} /></div> : <>
       <section className="panel routing-panel"><div className="panel-header"><div><div className="panel-overline">ROUTE EDITOR</div><h2>Change a capability binding</h2></div><span className="revision-chip">OPTIMISTIC REVISION</span></div><form onSubmit={submit} className="routing-form"><label>Tenant<select value={tenantId} onChange={event => { setTenantId(event.target.value); setExpectedRevision(0); }}>{tenants.data?.map(tenant => <option key={tenant.tenantId} value={tenant.tenantId}>{tenant.tenantCode} · {tenant.tenantId.slice(0, 8)}</option>)}</select></label><label>Capability<select value={capability} onChange={event => setCapability(event.target.value)}>{["CREDIT_SCORE", "BLACKLIST", "FRAUD_SIGNAL", "DISBURSE", "COLLECT", "QUERY_STATUS"].map(value => <option key={value}>{value}</option>)}</select></label><label>Provider<select value={artifactIdentity} onChange={event => setArtifactIdentity(event.target.value)} required><option value="">Select active capable provider</option>{activeArtifacts.map(item => <option key={`${item.key.pluginId}:${item.key.pluginVersion}`} value={`${item.key.pluginId}:${item.key.pluginVersion}`}>{item.key.pluginId} · v{item.key.pluginVersion}</option>)}</select></label><label>Expected revision<input type="number" min="0" value={expectedRevision} onChange={event => setExpectedRevision(Number(event.target.value))} /></label><button className="button primary" disabled={busy || !artifactIdentity}>{busy ? "Committing…" : "Commit route"}</button></form>{error && <div className="inline-error">{error}</div>}<p className="muted-copy">A stale revision is rejected. Successful updates are committed before the in-memory routing snapshot is published.</p></section>
-      <section className="panel"><div className="panel-header"><div><div className="panel-overline">CURRENT ROUTES</div><h2>{tenants.data?.find(tenant => tenant.tenantId === tenantId)?.tenantCode ?? "Tenant"}</h2></div><span>{bindings.data?.length ?? 0} bindings</span></div><div className="table-scroll"><table><thead><tr><th>CAPABILITY</th><th>PROVIDER</th><th>REVISION</th><th /></tr></thead><tbody>{bindings.data?.map(binding => <tr key={binding.capability}><td><b>{binding.capability}</b></td><td>{binding.pluginKey.pluginId} · v{binding.pluginKey.pluginVersion}</td><td>r{binding.version}</td><td><button className="text-button danger-text" disabled={busy} onClick={() => void removeBinding(binding)}>Unbind</button></td></tr>)}{!bindings.data?.length && <tr><td colSpan={4}><div className="empty"><b>No persisted routes</b><p>Choose an active plugin that implements the selected capability.</p></div></td></tr>}</tbody></table></div></section>
+       <section className="panel"><div className="panel-header"><div><div className="panel-overline">CURRENT ROUTES</div><h2>{tenants.data?.find(tenant => tenant.tenantId === tenantId)?.tenantCode ?? "Tenant"}</h2></div><span>{bindings.data?.length ?? 0} bindings</span></div><div className="table-scroll"><table><thead><tr><th>CAPABILITY</th><th>PROVIDER</th><th>REVISION</th><th><span className="sr-only">Binding action</span></th></tr></thead><tbody>{bindings.data?.map(binding => <tr key={binding.capability}><td><b>{binding.capability}</b></td><td>{binding.pluginKey.pluginId} · v{binding.pluginKey.pluginVersion}</td><td>r{binding.version}</td><td><button className="text-button danger-text" disabled={busy} onClick={() => void removeBinding(binding)}>Unbind</button></td></tr>)}{!bindings.data?.length && <tr><td colSpan={4}><div className="empty"><b>No persisted routes</b><p>Choose an active plugin that implements the selected capability.</p></div></td></tr>}</tbody></table></div></section>
     </>}
   </>;
 }

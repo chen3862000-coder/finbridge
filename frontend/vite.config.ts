@@ -6,7 +6,7 @@ export default defineVitestConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "VITE_");
   return {
     plugins: [react()],
-  server: {
+    server: {
     host: true,
       proxy: {
       "/api": env.VITE_API_PROXY_TARGET ?? "http://localhost:8080",
@@ -15,6 +15,8 @@ export default defineVitestConfig(({ mode }) => {
       "/logout": env.VITE_API_PROXY_TARGET ?? "http://localhost:8080",
       },
     },
-    test: { environment: "jsdom" },
+    preview: { host: true, port: 5173 },
+      test: { environment: "jsdom", include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+        exclude: ["**/*.a11y.test.tsx"] },
   };
 });

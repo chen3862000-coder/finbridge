@@ -16,9 +16,16 @@ import java.util.ServiceLoader;
 
 final class PluginDiscovery {
     private final ClassLoader parent;
+    private final PluginLifecycleCallbackExecutor lifecycleCallbacks;
 
-    PluginDiscovery(ClassLoader parent) {
+    @FunctionalInterface
+    interface PluginCall<T> {
+        T call();
+    }
+
+    PluginDiscovery(ClassLoader parent, PluginLifecycleCallbackExecutor lifecycleCallbacks) {
         this.parent = parent;
+        this.lifecycleCallbacks = lifecycleCallbacks;
     }
 
     PluginClassLoader createLoader(Path artifact) {
@@ -108,25 +115,53 @@ final class PluginDiscovery {
         }
     }
 
-    void closeFailedLoad(FinBridgePlugin provider, PluginClassLoader loader) {
-        if (provider != null) {
-            try {
-                withContextLoader(loader, () -> {
-                    provider.close();
-                    return null;
-                });
-            } catch (RuntimeException ignored) {
-                // Preserve the primary validation failure; close the class loader regardless.
-            }
+    boolean closeFailedLoad(FinBridgePlugin provider, PluginClassLoader loader, boolean callbackTimedOut) {
+        if (callbackTimedOut) {
+            return closeTimedOutLoad(loader);
+        }
+        closeProviderIfPresent(provider, loader);
+        closeLoader(loader);
+        lifecycleCallbacks.releaseQuarantine(loader);
+        return false;
+    }
+
+    private boolean closeTimedOutLoad(PluginClassLoader loader) {
+        if (lifecycleCallbacks.canCloseLoader(loader)) {
+            closeLoader(loader);
+            lifecycleCallbacks.releaseQuarantine(loader);
+        }
+        return true;
+    }
+
+    private void closeProviderIfPresent(FinBridgePlugin provider, PluginClassLoader loader) {
+        if (provider == null) {
+            return;
         }
         try {
-            loader.close();
-        } catch (IOException ignored) {
-            // Preserve the primary validation failure.
+            lifecycleCallbacks.execute("failed-load close", loader, provider::close);
+        } catch (PluginLifecycleCallbackException failure) {
+            recordFailedLoadCallback(loader, failure);
+        } catch (RuntimeException ignored) {
+            // Preserve the primary validation failure and continue closing the class loader.
         }
     }
 
-    static <T> T withContextLoader(ClassLoader loader, PluginHandle.PluginCall<T> call) {
+    private void recordFailedLoadCallback(PluginClassLoader loader,
+            PluginLifecycleCallbackException failure) {
+        if (failure.timedOut() || !lifecycleCallbacks.canCloseLoader(loader)) {
+            lifecycleCallbacks.releaseQuarantine(loader);
+        }
+    }
+
+    private static void closeLoader(PluginClassLoader loader) {
+        try {
+            loader.close();
+        } catch (IOException ignored) {
+            // Preserve the primary plugin callback failure.
+        }
+    }
+
+    static <T> T withContextLoader(ClassLoader loader, PluginCall<T> call) {
         Thread thread = Thread.currentThread();
         ClassLoader original = thread.getContextClassLoader();
         try {

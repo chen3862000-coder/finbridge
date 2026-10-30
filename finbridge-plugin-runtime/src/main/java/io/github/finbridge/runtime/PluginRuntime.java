@@ -5,8 +5,10 @@ import io.github.finbridge.spi.FinBridgePlugin;
 import io.github.finbridge.spi.PluginContext;
 import io.github.finbridge.spi.PluginDescriptor;
 import io.github.finbridge.spi.PluginKey;
+import io.github.finbridge.spi.PluginHealth;
 import io.github.finbridge.spi.risk.RiskDataProvider;
 import java.io.IOException;
+import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -14,17 +16,25 @@ import java.util.ServiceConfigurationError;
 import java.util.UUID;
 
 /** Loads external provider artifacts and coordinates registry, tenant routing, and lifecycle state. */
-public final class PluginRuntime {
+public final class PluginRuntime implements AutoCloseable {
     private final PluginArtifactRepository artifacts;
     private final PluginDiscovery discovery;
+    private final PluginLifecycleCallbackExecutor lifecycleCallbacks;
     private final PluginRegistry registry = new PluginRegistry();
     private final PluginBindingRegistry bindingRegistry = new PluginBindingRegistry();
     private final int supportedSpiMajor;
 
     public PluginRuntime(Path artifactRoot, ClassLoader parent, int supportedSpiMajor) {
+        this(artifactRoot, parent, supportedSpiMajor, java.time.Duration.ofSeconds(2));
+    }
+
+    public PluginRuntime(Path artifactRoot, ClassLoader parent, int supportedSpiMajor,
+                         java.time.Duration lifecycleCallbackTimeout) {
         this.artifacts = new PluginArtifactRepository(artifactRoot);
-        this.discovery = new PluginDiscovery(parent);
+        this.lifecycleCallbacks = new PluginLifecycleCallbackExecutor(lifecycleCallbackTimeout);
+        this.discovery = new PluginDiscovery(Objects.requireNonNull(parent, "parent"), lifecycleCallbacks);
         if (supportedSpiMajor < 1) {
+            lifecycleCallbacks.close();
             throw new IllegalArgumentException("supportedSpiMajor must be positive");
         }
         this.supportedSpiMajor = supportedSpiMajor;
@@ -38,18 +48,19 @@ public final class PluginRuntime {
         String checksum = artifacts.checksum(artifact);
         PluginClassLoader loader = discovery.createLoader(artifact);
         FinBridgePlugin provider = null;
+        PluginDescriptor descriptor = null;
         try {
             provider = discovery.discover(loader);
-            PluginDescriptor descriptor = Objects.requireNonNull(provider.descriptor(),
+            descriptor = Objects.requireNonNull(provider.descriptor(),
                     "Plugin descriptor is required");
             validatePlugin(provider, descriptor);
             initializePlugin(provider, loader, context);
             return registerPlugin(descriptor, checksum, provider, loader);
         } catch (PluginLoadException failure) {
-            discovery.closeFailedLoad(provider, loader);
+            closeFailedLoad(provider, descriptor, checksum, loader, failure);
             throw failure;
         } catch (ServiceConfigurationError | LinkageError | RuntimeException failure) {
-            discovery.closeFailedLoad(provider, loader);
+            closeFailedLoad(provider, descriptor, checksum, loader, failure);
             throw new PluginLoadException("Plugin artifact failed validation: " + artifactName,
                     failure);
         }
@@ -94,9 +105,10 @@ public final class PluginRuntime {
         String checksum = artifacts.checksum(artifact);
         PluginClassLoader loader = discovery.createLoader(artifact);
         RiskDataProvider provider = null;
+        PluginDescriptor descriptor = null;
         try {
             provider = discovery.discoverRiskProvider(loader);
-            PluginDescriptor descriptor = Objects.requireNonNull(provider.descriptor(),
+            descriptor = Objects.requireNonNull(provider.descriptor(),
                     "Plugin descriptor is required");
             discovery.validateDescriptor(descriptor, supportedSpiMajor);
             discovery.validateProviderContract(provider, descriptor);
@@ -105,18 +117,19 @@ public final class PluginRuntime {
             }
             RiskDataProvider initialized = provider;
             PluginDiscovery.withContextLoader(loader, () -> {
-                initialized.initialize(context);
-                if (!initialized.healthCheck().healthy()) {
+                lifecycleCallbacks.execute("initialize", loader, () -> initialized.initialize(context));
+                PluginHealth health = healthCheck(initialized, loader);
+                if (!health.healthy()) {
                     throw new PluginLoadException("Risk provider health check failed");
                 }
                 return null;
             });
             return registerPlugin(descriptor, checksum, provider, loader);
         } catch (PluginLoadException failure) {
-            discovery.closeFailedLoad(provider, loader);
+            closeFailedLoad(provider, descriptor, checksum, loader, failure);
             throw failure;
         } catch (ServiceConfigurationError | LinkageError | RuntimeException failure) {
-            discovery.closeFailedLoad(provider, loader);
+            closeFailedLoad(provider, descriptor, checksum, loader, failure);
             throw new PluginLoadException("Risk plugin artifact failed validation: " + artifactName,
                     failure);
         }
@@ -223,15 +236,27 @@ public final class PluginRuntime {
         }
     }
 
+    @Override
+    public void close() {
+        lifecycleCallbacks.close();
+    }
+
     private void initializePlugin(FinBridgePlugin provider, PluginClassLoader loader,
                                   PluginContext context) {
         PluginDiscovery.withContextLoader(loader, () -> {
-            provider.initialize(context);
-            if (!provider.healthCheck().healthy()) {
+            lifecycleCallbacks.execute("initialize", loader, () -> provider.initialize(context));
+            if (!healthCheck(provider, loader).healthy()) {
                 throw new PluginLoadException("Plugin health check failed");
             }
             return null;
         });
+    }
+
+    private PluginHealth healthCheck(FinBridgePlugin provider, PluginClassLoader loader) {
+        java.util.concurrent.atomic.AtomicReference<PluginHealth> health =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        lifecycleCallbacks.execute("health check", loader, () -> health.set(provider.healthCheck()));
+        return Objects.requireNonNull(health.get(), "Plugin health status is required");
     }
 
     private void validatePlugin(FinBridgePlugin provider, PluginDescriptor descriptor) {
@@ -241,7 +266,7 @@ public final class PluginRuntime {
 
     private PluginHandle registerPlugin(PluginDescriptor descriptor, String checksum,
                                         FinBridgePlugin provider, PluginClassLoader loader) {
-        PluginHandle handle = new PluginHandle(descriptor, checksum, provider, loader);
+        PluginHandle handle = new PluginHandle(descriptor, checksum, provider, loader, lifecycleCallbacks);
         PluginHandle existing = registry.putIfAbsent(handle);
         return reuseOrReject(existing, checksum, provider, loader, handle);
     }
@@ -256,7 +281,52 @@ public final class PluginRuntime {
         if (!sameBytes) {
             throw new PluginLoadException("Plugin identity already exists with different bytes");
         }
-        discovery.closeFailedLoad(provider, loader);
+        discovery.closeFailedLoad(provider, loader, false);
         return existing;
+    }
+
+    private static boolean callbackTimedOut(Throwable failure) {
+        Throwable cause = failure;
+        while (cause != null) {
+            if (cause instanceof PluginLifecycleCallbackException callbackFailure
+                    && callbackFailure.timedOut()) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private void closeFailedLoad(FinBridgePlugin provider, PluginDescriptor descriptor, String checksum,
+                                 PluginClassLoader loader, Throwable failure) {
+        boolean quarantined = discovery.closeFailedLoad(provider, loader, callbackTimedOut(failure));
+        if (quarantined && provider != null && descriptor != null) {
+            registerQuarantinedHandle(provider, descriptor, checksum, loader, failure);
+        }
+    }
+
+    private void registerQuarantinedHandle(FinBridgePlugin provider, PluginDescriptor descriptor,
+                                           String checksum, PluginClassLoader loader, Throwable failure) {
+        PluginHandle quarantined = new PluginHandle(descriptor, checksum, provider, loader,
+                lifecycleCallbacks);
+        quarantined.markFailed("PLUGIN_LIFECYCLE_CALLBACK_TIMED_OUT");
+        PluginHandle existing = registry.putIfAbsent(quarantined);
+        if (existing != null) {
+            discardQuarantinedLoader(loader);
+            throw new PluginLoadException("Timed-out provider could not be quarantined under its identity",
+                    failure);
+        }
+    }
+
+    void discardQuarantinedLoader(URLClassLoader loader) {
+        if (!lifecycleCallbacks.canCloseLoader(loader)) {
+            return;
+        }
+        lifecycleCallbacks.releaseQuarantine(loader);
+        try {
+            loader.close();
+        } catch (IOException ignored) {
+            // Preserve the identity collision that prevented a quarantined registration.
+        }
     }
 }

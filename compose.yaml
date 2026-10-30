@@ -21,7 +21,7 @@ services:
   console:
     image: node:24.13.1-alpine
     working_dir: /workspace/frontend
-    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0"]
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run build && npm run preview -- --host 0.0.0.0"]
     environment:
       VITE_API_PROXY_TARGET: http://demo-api:8080
     volumes:

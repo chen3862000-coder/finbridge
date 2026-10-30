@@ -1,6 +1,5 @@
 package io.github.finbridge.runtime;
 
-import io.github.finbridge.spi.FinBridgePlugin;
 import io.github.finbridge.spi.PluginDescriptor;
 import io.github.finbridge.spi.PluginKey;
 import java.io.IOException;
@@ -11,23 +10,33 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 public final class PluginHandle {
     private final PluginDescriptor descriptor;
     private final String sha256;
-    private final FinBridgePlugin provider;
-    private final URLClassLoader classLoader;
+    private final PluginLifecycleResources resources;
     private final List<PluginLifecycleEvent> events = new ArrayList<>();
     private PluginLifecycleState state = PluginLifecycleState.LOADED;
     private int activeInvocations;
 
-    PluginHandle(PluginDescriptor descriptor, String sha256, FinBridgePlugin provider,
+    PluginHandle(PluginDescriptor descriptor, String sha256, io.github.finbridge.spi.FinBridgePlugin provider,
+                 URLClassLoader classLoader, PluginLifecycleCallbackExecutor lifecycleCallbacks) {
+        this(descriptor, sha256, provider, classLoader, lifecycleCallbacks, false);
+    }
+
+    PluginHandle(PluginDescriptor descriptor, String sha256, io.github.finbridge.spi.FinBridgePlugin provider,
                  URLClassLoader classLoader) {
+        this(descriptor, sha256, provider, classLoader,
+                new PluginLifecycleCallbackExecutor(Duration.ofSeconds(2)), true);
+    }
+
+    private PluginHandle(PluginDescriptor descriptor, String sha256, io.github.finbridge.spi.FinBridgePlugin provider,
+                         URLClassLoader classLoader, PluginLifecycleCallbackExecutor lifecycleCallbacks,
+                         boolean ownsLifecycleCallbacks) {
         this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
         this.sha256 = Objects.requireNonNull(sha256, "sha256");
-        this.provider = Objects.requireNonNull(provider, "provider");
-        this.classLoader = Objects.requireNonNull(classLoader, "classLoader");
+        this.resources = new PluginLifecycleResources(provider, classLoader, lifecycleCallbacks,
+                ownsLifecycleCallbacks);
         record(PluginLifecycleState.DISCOVERED, "ARTIFACT_DISCOVERED");
         record(PluginLifecycleState.VALIDATED, "ARTIFACT_VALIDATED");
         record(PluginLifecycleState.LOADED, "PLUGIN_LOADED");
@@ -46,8 +55,7 @@ public final class PluginHandle {
     }
 
     public String classLoaderIdentity() {
-        return classLoader.getClass().getName() + "@"
-                + Integer.toHexString(System.identityHashCode(classLoader));
+        return resources.classLoaderIdentity();
     }
 
     public synchronized PluginLifecycleState state() {
@@ -70,6 +78,13 @@ public final class PluginHandle {
     public synchronized void beginDrain() {
         requireState(PluginLifecycleState.ACTIVE);
         transition(PluginLifecycleState.DRAINING, "PLUGIN_DRAINING");
+    }
+
+    synchronized void markFailed(String diagnostic) {
+        if (state != PluginLifecycleState.FAILED) {
+            state = PluginLifecycleState.FAILED;
+            record(PluginLifecycleState.FAILED, diagnostic);
+        }
     }
 
     public synchronized void resumeFromDrain() {
@@ -134,9 +149,8 @@ public final class PluginHandle {
         transition(PluginLifecycleState.UNLOADED, "PLUGIN_LOAD_DISCARDED");
     }
 
-    <T> T invoke(Function<FinBridgePlugin, T> invocation) {
-        Objects.requireNonNull(invocation, "invocation");
-        return withPluginContextClassLoader(() -> invocation.apply(provider));
+    <T> T invoke(java.util.function.Function<io.github.finbridge.spi.FinBridgePlugin, T> operation) {
+        return resources.invoke(operation);
     }
 
     private void requireState(PluginLifecycleState expected) {
@@ -155,35 +169,13 @@ public final class PluginHandle {
     }
 
     private void closeProviderAndLoader() throws IOException {
-        Thread thread = Thread.currentThread();
-        ClassLoader originalLoader = thread.getContextClassLoader();
-        try (URLClassLoader ignoredLoader = classLoader;
-             FinBridgePlugin closingProvider = provider) {
-            thread.setContextClassLoader(classLoader);
-            closingProvider.close();
-        } catch (RuntimeException failure) {
+        try {
+            resources.close();
+        } catch (IOException failure) {
             state = PluginLifecycleState.FAILED;
             record(PluginLifecycleState.FAILED, "PLUGIN_CLOSE_FAILED");
-            throw new IOException("Plugin close hook failed", failure);
-        } finally {
-            thread.setContextClassLoader(originalLoader);
+            throw failure;
         }
-    }
-
-    private <T> T withPluginContextClassLoader(PluginCall<T> action) {
-        Thread thread = Thread.currentThread();
-        ClassLoader original = thread.getContextClassLoader();
-        try {
-            thread.setContextClassLoader(classLoader);
-            return action.call();
-        } finally {
-            thread.setContextClassLoader(original);
-        }
-    }
-
-    @FunctionalInterface
-    interface PluginCall<T> {
-        T call();
     }
 
 }

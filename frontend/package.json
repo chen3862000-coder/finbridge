@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "preview": "vite preview",
     "test": "vitest run",
+    "test:a11y": "vitest run --config vitest.a11y.config.tsx",
     "test:e2e": "node ../scripts/demo-http-e2e.mjs"
   },
   "dependencies": {
@@ -22,7 +24,9 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.6",
+    "axe-core": "^4.14.0",
     "jsdom": "26.1.0",
-    "vitest": "3.2.4"
+    "playwright": "^1.64.1",
+    "vitest": "^5.0.5"
   }
 }

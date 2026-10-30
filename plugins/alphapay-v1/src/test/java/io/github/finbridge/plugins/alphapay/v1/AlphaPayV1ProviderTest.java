@@ -1,6 +1,7 @@
 package io.github.finbridge.plugins.alphapay.v1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.finbridge.spi.OperationContext;
 import io.github.finbridge.spi.payment.DisbursementRequest;
@@ -15,6 +16,18 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class AlphaPayV1ProviderTest {
+    @Test
+    void lifecycleHooksAcceptOptionalSyntheticDelayConfiguration() {
+        AlphaPayV1Provider provider = new AlphaPayV1Provider();
+        provider.initialize(new io.github.finbridge.spi.PluginContext(java.util.Map.of(
+                "test.lifecycle.initialize-delay-ms", "1",
+                "test.lifecycle.health-delay-ms", "1",
+                "test.lifecycle.close-delay-ms", "1")));
+
+        assertTrue(provider.healthCheck().healthy());
+        provider.close();
+    }
+
     @Test
     void disbursesWithV1PrivateMarkerAndCanQueryItsOwnTransaction() {
         AlphaPayV1Provider provider = new AlphaPayV1Provider();
@@ -53,4 +66,5 @@ class AlphaPayV1ProviderTest {
     private static OperationContext context() {
         return new OperationContext(UUID.randomUUID(), "test", Instant.now().plusSeconds(2));
     }
+
 }

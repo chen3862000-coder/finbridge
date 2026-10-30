@@ -3,7 +3,7 @@
 **Status:** Active approved design baseline for M1; remaining M0 policy choices are still open for M2 review.  
 **Specification:** FinBridge Coding Agent Implementation Prompt v2.0  
 **JDK:** Java 21, fixed requirement  
-**Original scope:** M0 architecture redesign and bounded technical validation only. User subsequently authorized M1 through M6 and the M7 authenticated local borrower demo layer in ADR-014. The broader M7 documentation/portfolio release checklist remains open.
+**Original scope:** M0 architecture redesign and bounded technical validation only. User subsequently authorized M1 through M6 and the M7 authenticated local borrower demo layer in ADR-014. This proposal is historical design context; current release evidence and status are recorded in the architecture review checklist.
 **Principle:** One Stable Lending Core. Pluggable Risk and Payment Providers. Complete Loan Origination. Safe Runtime Evolution.
 
 ## 1. Executive Proposal
@@ -391,7 +391,7 @@ M2 source and evidence are linked in `docs/architecture/02-lending-domain-model.
 
 ### M7 — Documentation and Portfolio Release
 
-- Complete and verify the 13 architecture topics, accepted ADRs, implementation guides, seven evidence-linked demo walkthroughs, README, portfolio case study, screenshots, Docker Compose, clean-worktree verification, tests, and repository hygiene review. The architecture topics, six guides, seven walkthrough documents, and case study exist. All seven walkthroughs now have recorded execution evidence (Demos 2-5 via focused Java and live E2E commands; Demo 6 via real-JAR integration evidence; Demos 1 and 7 via live HTTP). An anonymous borrower entry screenshot is captured. A detached clean worktree containing staged, unstaged, and untracked changes passed the Java, frontend, Compose, and authenticated HTTP checks. M7 remains open for final release review and the specific OIDC live-callback limitations recorded in ADR-014; production identity/security review remains out of scope. Existing SPI/class-loader/lifecycle documents retain their established filenames to avoid breaking links.
+- Complete and verify the 13 architecture topics, accepted ADRs, implementation guides, seven evidence-linked demo walkthroughs, README, portfolio case study, screenshots, Docker Compose, clean-worktree verification, tests, and repository hygiene review. The documentation and local demo implementation exist. A subsequent current-source verification and its exact commit/result are recorded in the public-release review record in `docs/quality/architecture-review-checklist.md`. Production identity/security review remains out of scope. Existing SPI/class-loader/lifecycle documents retain their established filenames to avoid breaking links.
 - **Approved scope:** add an authenticated client API demo layer so a synthetic borrower can apply for a loan and query application, approval/workflow, loan, repayment, and payment status. This extends M7 only; it does not change the M5/M6 baseline. The local demo API, authenticated journey, and release evidence are implemented. The worktree remains uncommitted pending user-directed publication; no production identity or security claims are made.
 
 #### Approved Client API Demo Layer (ADR-014)

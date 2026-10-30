@@ -1,0 +1,16 @@
+# Local fallback for running the current host artifact when Docker Hub is unavailable.
+# Build the repository first with the JDK 21 Maven Wrapper. CI uses compose.yaml and builds normally.
+services:
+  demo-api:
+    image: finbridge-local-demo-api:latest
+    build: !reset null
+    entrypoint: ["java", "-jar", "/app/demo.jar"]
+    working_dir: /app
+    volumes:
+      - ./finbridge-demo-app/target/finbridge-demo-app-0.1.0-SNAPSHOT.jar:/app/demo.jar:ro
+      - ./plugins/alphapay-v1/target/alphapay-v1-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/alphapay-1.0.0-jar-with-dependencies.jar:ro
+      - ./plugins/alphapay-v2/target/alphapay-v2-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/alphapay-2.0.0-jar-with-dependencies.jar:ro
+      - ./plugins/betapay/target/betapay-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/betapay-1.0.0-jar-with-dependencies.jar:ro
+      - ./plugins/creditscorex/target/creditscorex-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/creditscorex-1.0.0-jar-with-dependencies.jar:ro
+      - ./plugins/blacklisty/target/blacklisty-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/blacklisty-1.0.0-jar-with-dependencies.jar:ro
+      - ./plugins/fraudsignalz/target/fraudsignalz-0.1.0-SNAPSHOT-jar-with-dependencies.jar:/app/plugins/fraudsignalz-1.0.0-jar-with-dependencies.jar:ro

@@ -1,8 +1,5 @@
 server:
   forward-headers-strategy: framework
-  tomcat:
-    remoteip:
-      internal-proxies: ".*"
   servlet:
     session:
       timeout: ${FINBRIDGE_DEMO_SESSION_TIMEOUT:30m}
