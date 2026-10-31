@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
@@ -52,9 +51,17 @@ class DemoIdentityFilterTest {
         var contexts = mock(SecurityContextRepository.class);
         var key = new DemoIdentityMembershipRepository.MembershipKey(ISSUER, "synthetic-subject");
         var principal = new FinBridgePrincipal("borrower", TENANT_ID);
-        var authorities = List.of(new SimpleGrantedAuthority("ROLE_FINBRIDGE_AUTHENTICATED"));
-        var authentication = UsernamePasswordAuthenticationToken.authenticated(principal, "", authorities);
-        authentication.setDetails(key);
+        var idToken = org.springframework.security.oauth2.core.oidc.OidcIdToken.withTokenValue("synthetic-token")
+                .issuer(ISSUER).subject("synthetic-subject")
+                .issuedAt(java.time.Instant.now().minusSeconds(1))
+                .expiresAt(java.time.Instant.now().plusSeconds(120)).build();
+        var delegate = new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(List.of(), idToken,
+                new org.springframework.security.oauth2.core.oidc.OidcUserInfo(java.util.Map.of("sub",
+                        "synthetic-subject")), "sub");
+        var user = new DemoOidcUser(delegate, principal, key, false);
+        var oidcAuthentication = new OAuth2AuthenticationToken(user, user.getAuthorities(), "finbridge");
+        var authentication = UsernamePasswordAuthenticationToken.authenticated(principal, "", user.getAuthorities());
+        authentication.setDetails(oidcAuthentication);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         when(memberships.findEnabled(ISSUER, "synthetic-subject")).thenReturn(Optional.of(
                 new DemoIdentityMembershipRepository.Membership("borrower", TENANT_ID, false)));

@@ -49,7 +49,9 @@ function useResource<T>(loader: () => Promise<T>, dependencies: unknown[] = []) 
   return { data, error, loading, reload };
 }
 
-export function App() {
+export function App({ submitLogout = (form: HTMLFormElement) => form.submit() }: {
+  submitLogout?: (form: HTMLFormElement) => void;
+} = {}) {
   if (window.location.pathname === "/borrower") return <BorrowerPage />;
   const [section, setSection] = useState<Section>("dashboard");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -122,7 +124,7 @@ export function App() {
       <header className="topbar">
         <div className="crumb"><span>FinBridge</span><span className="slash">/</span><b>{selectedApplication ? "Application record" : selectedLoan ? "Loan record" : title}</b></div>
         <div className="top-actions">
-          <div className="top-identity"><ConsoleIdentity /></div>
+          <div className="top-identity"><ConsoleIdentity submitLogout={submitLogout} /></div>
         </div>
       </header>
       <div id="main-content" className="content" tabIndex={-1}>
@@ -154,27 +156,23 @@ function SignedOutPage() {
     <span className="brand-mark"><i /><i /><i /></span>
     <div className="kicker">FINBRIDGE INTERNAL CONSOLE</div>
     <h1>Sign in to continue</h1>
-    <p>Your session has ended. Sign in again to view persisted lending and workflow data.</p>
-    <a className="button primary" href="/oauth2/authorization/finbridge">Sign in</a>
+    <p>Choose an account to view persisted lending and workflow data.</p>
+    <a className="button primary" href={oidcRestartUrl()}>Restart Login</a>
   </section></main>;
 }
 
-function ConsoleIdentity() {
+function ConsoleIdentity({ submitLogout }: { submitLogout: (form: HTMLFormElement) => void }) {
   const [session, setSession] = useState<{ subject: string; administrator: boolean } | null>(null);
   useEffect(() => {
     void fetch("/api/session").then(response => response.ok ? response.json() : null)
       .then(value => setSession(value?.authenticated ? value : null)).catch(() => setSession(null));
   }, []);
-  const signOut = async () => {
-    const csrf = await fetch("/api/csrf").then(response => response.json());
-    await fetch("/logout", { method: "POST", headers: { [csrf.headerName]: csrf.token } });
-    window.location.assign("/");
-  };
+  const signOut = () => postLogout(submitLogout);
   return <div className="principal"><div className="avatar">{session?.administrator ? "AD" : "TN"}</div>
     <div><b>{session?.subject ?? "Sign-in required"}</b>
       <span>{session?.administrator ? "FinBridge administrator" : "Mapped tenant identity"}</span></div>
     {session ? <button className="sign-out-button" onClick={() => void signOut()}>Sign out</button>
-      : <a className="more" href="/oauth2/authorization/finbridge" aria-label="Sign in">→</a>}</div>;
+      : <a className="more" href={oidcRestartUrl()} aria-label="Sign in">→</a>}</div>;
 }
 
 function BorrowerPage() {
@@ -184,7 +182,9 @@ function BorrowerPage() {
   const [products, setProducts] = useState<Array<{ productCode: string; currency: string;
     minimumPrincipal: string; maximumPrincipal: string; allowedTermsMonths: number[] }> | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => new URLSearchParams(window.location.search).has("loginError")
+    ? "Sign-in failed. Check your local demo account and password, then try again."
+    : "");
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
@@ -241,7 +241,7 @@ function BorrowerPage() {
     <div className="borrower-card"><div className="kicker">FINBRIDGE / SYNTHETIC BORROWER DEMO</div>
       <h1>Explore a loan application</h1><p>Sign in with a seeded demo account to see only that account's tenant data.</p>
       {error && <div role="alert" className="inline-error">{error}</div>}
-      <a className="button primary" href="/oauth2/authorization/finbridge">Sign in securely</a>
+      <a className="button primary" href={oidcRestartUrl()}>Sign in securely</a>
       <p className="muted">Synthetic data only. This local identity provider is not production authentication.</p>
     </div></main>;
 
@@ -273,12 +273,30 @@ function BorrowerPage() {
               ? ` · ${assessment.reasonCodes.join(", ")}` : ""}` : ""} / ${status.workflow?.state ?? "NO_WORKFLOW"}`
           + (status.loan ? ` / LOAN ${status.loan.status}` : "") }));
       }}>Check status</button></article>) : <p>No applications yet.</p>}
-    <button className="button secondary" onClick={async () => {
-      const csrf = await fetch("/api/csrf").then(response => response.json());
-      await fetch("/logout", { method: "POST", headers: { [csrf.headerName]: csrf.token } });
-      window.location.assign("/borrower");
-    }}>Sign out</button>
+    <button className="button secondary" onClick={() => void postLogout(form => form.submit())}>Sign out</button>
   </div></main>;
+}
+
+export function oidcRestartUrl() {
+  const endSession = new URL("/auth/realms/finbridge/protocol/openid-connect/logout", window.location.origin);
+  endSession.searchParams.set("client_id", "finbridge-demo");
+  endSession.searchParams.set("post_logout_redirect_uri",
+    `${window.location.origin}/oauth2/authorization/finbridge`);
+  return endSession.toString();
+}
+
+async function postLogout(submitLogout: (form: HTMLFormElement) => void) {
+  const csrf = await fetch("/api/csrf").then(response => response.json());
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = "/logout";
+  const token = document.createElement("input");
+  token.type = "hidden";
+  token.name = csrf.parameterName ?? "_csrf";
+  token.value = csrf.token;
+  form.append(token);
+  document.body.append(form);
+  submitLogout(form);
 }
 
 function PageHeading({ kicker, title, description, actions }: { kicker: string; title: string; description: string; actions?: React.ReactNode }) {

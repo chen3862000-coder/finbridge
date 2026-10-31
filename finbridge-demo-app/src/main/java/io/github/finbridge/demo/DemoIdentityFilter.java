@@ -37,12 +37,14 @@ public class DemoIdentityFilter extends OncePerRequestFilter {
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
                 return;
             }
-            if (!trust(user.finBridgePrincipal(), user.membershipKey(), user.getAuthorities(), request, response)) {
+            if (!trust(user.finBridgePrincipal(), user, user.getAuthorities(), request, response)) {
                 return;
             }
-        } else if (current != null && current.getPrincipal() instanceof io.github.finbridge.host.FinBridgePrincipal principal
-                && current.getDetails() instanceof DemoIdentityMembershipRepository.MembershipKey key) {
-            if (!trust(principal, key, current.getAuthorities(), request, response)) {
+        } else if (current != null
+                && current.getPrincipal() instanceof io.github.finbridge.host.FinBridgePrincipal principal
+                && current.getDetails() instanceof OAuth2AuthenticationToken oauth
+                && oauth.getPrincipal() instanceof DemoOidcUser user) {
+            if (!trust(principal, user, current.getAuthorities(), request, response)) {
                 return;
             }
         }
@@ -50,13 +52,14 @@ public class DemoIdentityFilter extends OncePerRequestFilter {
     }
 
     private boolean trust(io.github.finbridge.host.FinBridgePrincipal principal,
-            DemoIdentityMembershipRepository.MembershipKey key,
+            DemoOidcUser user,
             java.util.Collection<? extends org.springframework.security.core.GrantedAuthority> authorities,
             HttpServletRequest request, HttpServletResponse response) throws IOException {
         var session = request.getSession(false);
         if (session != null) {
             session.setMaxInactiveInterval(sessionTimeoutSeconds);
         }
+        var key = user.membershipKey();
         var membership = memberships.findEnabled(key.issuer(), key.subject());
         if (membership.isEmpty() || !membership.orElseThrow().principalSubject().equals(principal.subject())
                 || !java.util.Objects.equals(membership.orElseThrow().tenantId(), principal.tenantId())
@@ -67,7 +70,7 @@ public class DemoIdentityFilter extends OncePerRequestFilter {
             return false;
         }
         var trusted = UsernamePasswordAuthenticationToken.authenticated(principal, "", authorities);
-        trusted.setDetails(key);
+        trusted.setDetails(new OAuth2AuthenticationToken(user, user.getAuthorities(), "finbridge"));
         var context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(trusted);
         SecurityContextHolder.setContext(context);

@@ -19,6 +19,10 @@ docker compose ps
 
 Wait for PostgreSQL, Keycloak, and `demo-api` to report healthy. The Console and HTTPS proxy should be running. Open `https://localhost:8443/borrower`; trust `deploy/tls/localhost.crt` in the local browser/OS trust store if prompted. Do not use the script's Node TLS-verification bypass outside the local E2E command.
 
+If local sign-in fails, Keycloak keeps the browser on its credential form and displays a generic invalid-credentials message. A successful callback returns to the borrower Console. If authentication fails after Keycloak returns to FinBridge (for example, because an identity has no enabled tenant membership), the borrower page displays a generic sign-in failure message instead of an API Whitelabel error. Use one of the seeded accounts below; the local demo does not support self-registration or password reset.
+
+After signing out, choose **Restart Login**. It performs OIDC RP-initiated logout to clear any remaining Keycloak SSO session, then starts a new Authorization Code + PKCE request. Keycloak may ask you to confirm logout before showing a fresh login form, where you can select another seeded account. The local Keycloak client allowlists the same-origin FinBridge authorization path as its post-logout return URI.
+
 ## Borrower Journeys
 
 1. Sign in as `borrower-alpha` / `alpha-local-only` for the standard approval path. The identity maps server-side to the alpha tenant and its own synthetic applicant reference; the borrower page lists only that account's applications. The browser does not submit a tenant ID or applicant ID.

@@ -1,10 +1,27 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { App } from "./main";
+import { App, oidcRestartUrl } from "./main";
 
 describe("FinBridge Console navigation", () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("shows a friendly message when OIDC redirects back after failed sign-in", async () => {
+    window.history.replaceState({}, "", "/borrower?loginError");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ authenticated: false, subject: null }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    })));
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Sign-in failed. Check your local demo account and password, then try again.");
+    expect(screen.getByRole("link", { name: "Sign in securely" }))
+      .toHaveAttribute("href", expect.stringContaining("/auth/realms/finbridge/protocol/openid-connect/logout"));
+  });
 
   it("loads persisted overview and navigates to the application workspace", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -78,25 +95,13 @@ describe("FinBridge Console navigation", () => {
     expect(fetchMock).toHaveBeenCalledWith(`/api/console/loans/${loanId}`, expect.anything());
   });
 
-  it("shows a visible sign-out button and posts logout with CSRF", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/session") return new Response(JSON.stringify({
-        authenticated: true, subject: "borrower-alpha", administrator: false,
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-      if (String(input) === "/api/csrf") return new Response(JSON.stringify({
-        headerName: "X-CSRF-TOKEN", token: "csrf-token",
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-      if (String(input) === "/logout") return new Promise<Response>(() => undefined);
-      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/logout", expect.objectContaining({
-      method: "POST", headers: { "X-CSRF-TOKEN": "csrf-token" },
-    })));
+  it("uses the browser origin and exact return path for Keycloak RP logout", () => {
+    const url = new URL(oidcRestartUrl());
+    expect(url.origin).toBe(window.location.origin);
+    expect(url.pathname).toBe("/auth/realms/finbridge/protocol/openid-connect/logout");
+    expect(url.searchParams.get("client_id")).toBe("finbridge-demo");
+    expect(url.searchParams.get("post_logout_redirect_uri"))
+      .toBe(`${window.location.origin}/oauth2/authorization/finbridge`);
   });
 
   it("shows a sign-in screen instead of loading dashboard data after logout", async () => {
@@ -106,6 +111,47 @@ describe("FinBridge Console navigation", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/oauth2/authorization/finbridge");
+    expect(screen.getByRole("link", { name: "Restart Login" })).toHaveAttribute("href",
+      expect.stringContaining("/auth/realms/finbridge/protocol/openid-connect/logout"));
+  });
+
+  it("returns the signed-in user to a working sign-in link after sign-out", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/session"
+      ? new Response(JSON.stringify({ authenticated: false, subject: null }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      })
+      : new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Sign in to continue" })).toBeInTheDocument();
+    const signIn = screen.getByRole("link", { name: "Restart Login" });
+    expect(signIn).toHaveAttribute("href",
+      expect.stringContaining("/auth/realms/finbridge/protocol/openid-connect/logout"));
+    expect(signIn).toBeVisible();
+  });
+
+  it("posts the authenticated Console sign-out through the native CSRF form", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/csrf") return new Response(JSON.stringify({
+        parameterName: "_csrf", token: "csrf-token",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      const session = String(input) === "/api/session";
+      return new Response(JSON.stringify(session
+        ? { authenticated: true, subject: "borrower-alpha", administrator: false } : []), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const submitLogout = vi.fn();
+    render(<App submitLogout={submitLogout} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(submitLogout).toHaveBeenCalled());
+    const form = submitLogout.mock.calls[0][0];
+    expect(form.method).toBe("post");
+    expect(new URL(form.action).pathname).toBe("/logout");
+    expect(form.querySelector("input[name='_csrf']")).toHaveValue("csrf-token");
   });
 });

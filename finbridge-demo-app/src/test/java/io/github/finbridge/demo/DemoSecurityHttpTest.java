@@ -15,6 +15,14 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.OidcUserInfo;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import io.github.finbridge.host.FinBridgePrincipal;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 
 @SpringBootTest(properties = {
         "finbridge.demo.oidc-issuer=https://issuer.test/realm"
@@ -28,6 +36,9 @@ class DemoSecurityHttpTest {
     private static final UUID ALPHA_APPLICATION = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @Autowired private MockMvc mvc;
+
+    @Autowired private org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
+            clientRegistrations;
 
     @org.testcontainers.junit.jupiter.Container
     private static final org.testcontainers.containers.PostgreSQLContainer<?> DATABASE =
@@ -121,19 +132,90 @@ class DemoSecurityHttpTest {
                         parts -> parts.length == 2 ? parts[1] : ""));
 
         org.junit.jupiter.api.Assertions.assertEquals("login", parameters.get("prompt"));
+        org.junit.jupiter.api.Assertions.assertFalse(parameters.containsKey("max_age"));
         org.junit.jupiter.api.Assertions.assertEquals("S256", parameters.get("code_challenge_method"));
         org.junit.jupiter.api.Assertions.assertNotNull(parameters.get("code_challenge"));
     }
 
+    @Test
+    void oidcAuthenticationFailureReturnsToBorrowerPage() throws Exception {
+        var request = new org.springframework.mock.web.MockHttpServletRequest();
+        var response = new org.springframework.mock.web.MockHttpServletResponse();
+        request.setContextPath("");
+        DemoSecurityConfiguration.redirectAfterOidcFailure(request, response,
+                new org.springframework.security.authentication.BadCredentialsException("invalid credentials"));
+
+        org.junit.jupiter.api.Assertions.assertEquals("/borrower?loginError", response.getRedirectedUrl());
+    }
+
+    @Test
+    void logoutRedirectsThroughOidcEndSessionAndStartsAccountSelection() throws Exception {
+        var registrations = new InMemoryClientRegistrationRepository(testRegistration());
+        var handler = DemoSecurityConfiguration.oidcLogoutSuccessHandler(registrations);
+        var idToken = OidcIdToken.withTokenValue("id-token")
+                .issuer(ISSUER).subject("alpha-subject")
+                .issuedAt(java.time.Instant.now().minusSeconds(10))
+                .expiresAt(java.time.Instant.now().plusSeconds(120)).build();
+        var user = new DefaultOidcUser(java.util.List.of(), idToken,
+                new OidcUserInfo(java.util.Map.of("sub", "alpha-subject")), "sub");
+        var request = new org.springframework.mock.web.MockHttpServletRequest("POST", "/logout");
+        var response = new org.springframework.mock.web.MockHttpServletResponse();
+        request.setScheme("https");
+        request.setServerName("localhost");
+        request.setServerPort(8443);
+        var trustedAuthentication = org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+                .authenticated(new FinBridgePrincipal("borrower-alpha", TENANT_ALPHA), "", user.getAuthorities());
+        trustedAuthentication.setDetails(new OAuth2AuthenticationToken(user, user.getAuthorities(), "finbridge"));
+
+        handler.onLogoutSuccess(request, response, trustedAuthentication);
+
+        org.junit.jupiter.api.Assertions.assertTrue(response.getRedirectedUrl().startsWith(
+                ISSUER + "/protocol/openid-connect/logout?"), response.getRedirectedUrl());
+        var parameters = java.util.Arrays.stream(java.net.URI.create(response.getRedirectedUrl()).getRawQuery()
+                        .split("&"))
+                .map(value -> value.split("=", 2))
+                .collect(java.util.stream.Collectors.toMap(parts -> parts[0],
+                        parts -> java.net.URLDecoder.decode(parts.length == 2 ? parts[1] : "",
+                                java.nio.charset.StandardCharsets.UTF_8)));
+        org.junit.jupiter.api.Assertions.assertTrue(parameters.containsKey("id_token_hint"), parameters.toString());
+        org.junit.jupiter.api.Assertions.assertEquals("https://localhost:8443/oauth2/authorization/finbridge",
+                parameters.get("post_logout_redirect_uri"));
+    }
+
+    @Test
+    void clientRegistrationHasKeycloakEndSessionEndpointForLogout() {
+        ClientRegistration registration = clientRegistrations.findByRegistrationId("finbridge");
+        org.junit.jupiter.api.Assertions.assertEquals(
+                ISSUER + "/protocol/openid-connect/logout",
+                registration.getProviderDetails().getConfigurationMetadata().get("end_session_endpoint"));
+    }
+
+    private static ClientRegistration testRegistration() {
+        return ClientRegistration.withRegistrationId("finbridge")
+                .clientId("finbridge-demo")
+                .clientAuthenticationMethod(org.springframework.security.oauth2.core.ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("https://localhost:8443/login/oauth2/code/finbridge")
+                .scope("openid", "profile")
+                .authorizationUri("https://localhost:8443/auth/realms/finbridge/protocol/openid-connect/auth")
+                .tokenUri("http://keycloak/auth/realms/finbridge/protocol/openid-connect/token")
+                .jwkSetUri("http://keycloak/auth/realms/finbridge/protocol/openid-connect/certs")
+                .userInfoUri("http://keycloak/auth/realms/finbridge/protocol/openid-connect/userinfo")
+                .userNameAttributeName("sub")
+                .issuerUri(ISSUER)
+                .providerConfigurationMetadata(java.util.Map.of("end_session_endpoint",
+                        ISSUER + "/protocol/openid-connect/logout"))
+                .clientName("FinBridge")
+                .build();
+    }
+
     private static org.springframework.test.web.servlet.request.RequestPostProcessor mappedLogin(
             String subject, UUID tenant, boolean admin) {
-        var idToken = org.springframework.security.oauth2.core.oidc.OidcIdToken.withTokenValue("test-token")
+        var idToken = OidcIdToken.withTokenValue("test-token")
                 .issuer(ISSUER).subject(subject).issuedAt(java.time.Instant.now().minusSeconds(1))
                 .expiresAt(java.time.Instant.now().plusSeconds(120)).build();
-        var userInfo = new org.springframework.security.oauth2.core.oidc.OidcUserInfo(
-                java.util.Map.of("sub", subject));
-        var delegate = new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(
-                java.util.List.of(), idToken, userInfo, "sub");
+        var userInfo = new OidcUserInfo(java.util.Map.of("sub", subject));
+        OidcUser delegate = new DefaultOidcUser(java.util.List.of(), idToken, userInfo, "sub");
         var membership = new DemoIdentityMembershipRepository.MembershipKey(ISSUER, subject);
         String principalSubject = switch (subject) {
             case "alpha-subject" -> "borrower-alpha";
@@ -142,9 +224,8 @@ class DemoSecurityHttpTest {
             default -> "borrower-" + subject;
         };
         var user = new DemoOidcUser(delegate,
-                new io.github.finbridge.host.FinBridgePrincipal(principalSubject, tenant), membership, admin);
-        var auth = new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(
-                user, user.getAuthorities(), "finbridge");
+                new FinBridgePrincipal(principalSubject, tenant), membership, admin);
+        var auth = new OAuth2AuthenticationToken(user, user.getAuthorities(), "finbridge");
         return authentication(auth);
     }
 

@@ -22,7 +22,7 @@
       "webOrigins": ["https://localhost:8443"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://localhost:8443/*"
+        "post.logout.redirect.uris": "https://localhost:8443/oauth2/authorization/finbridge"
       }
     }
   ],

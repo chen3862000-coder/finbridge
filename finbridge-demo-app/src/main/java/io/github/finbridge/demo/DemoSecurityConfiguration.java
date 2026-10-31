@@ -7,6 +7,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
+import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -18,6 +19,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import java.util.Map;
 
 @Configuration
 public class DemoSecurityConfiguration {
@@ -44,6 +46,8 @@ public class DemoSecurityConfiguration {
                 .jwkSetUri(jwkSetUri)
                 .userInfoUri(userInfoUri)
                 .userNameAttributeName("sub")
+                .providerConfigurationMetadata(Map.of("end_session_endpoint",
+                        issuer + "/protocol/openid-connect/logout"))
                 .issuerUri(issuer)
                 .clientName("FinBridge Local OIDC")
                 .build();
@@ -79,8 +83,11 @@ public class DemoSecurityConfiguration {
                 registrations, "/oauth2/authorization");
         requests.setAuthorizationRequestCustomizer(request -> {
             OAuth2AuthorizationRequestCustomizers.withPkce().accept(request);
-            request.additionalParameters(parameters -> parameters.put("prompt", "login"));
+            request.additionalParameters(parameters -> {
+                parameters.put("prompt", "login");
+            });
         });
+        var oidcLogout = oidcLogoutSuccessHandler(registrations);
         http.securityContext(context -> context.securityContextRepository(contexts))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/", "/borrower", "/console", "/src/**", "/@vite/**", "/@react-refresh",
@@ -93,9 +100,10 @@ public class DemoSecurityConfiguration {
                         .anyRequest().authenticated())
                 .oauth2Login(login -> login.authorizationEndpoint(endpoint ->
                         endpoint.authorizationRequestResolver(requests)).userInfoEndpoint(userInfo ->
-                        userInfo.oidcUserService(oidcUserService)))
+                        userInfo.oidcUserService(oidcUserService))
+                        .failureHandler(DemoSecurityConfiguration::redirectAfterOidcFailure))
                 .oauth2Client(Customizer.withDefaults())
-                .logout(logout -> logout.logoutSuccessUrl("/"))
+                .logout(logout -> logout.logoutSuccessHandler(oidcLogout))
                 .csrf(configurer -> configurer.csrfTokenRepository(csrf)
                         .csrfTokenRequestHandler(csrfTokenRequestHandler()))
                 .sessionManagement(session -> session.sessionFixation(fixation -> fixation.changeSessionId())
@@ -107,6 +115,28 @@ public class DemoSecurityConfiguration {
                 .addFilterAfter(identityFilter,
                         org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter.class);
         return http.build();
+    }
+
+    static void redirectAfterOidcFailure(jakarta.servlet.http.HttpServletRequest request,
+            jakarta.servlet.http.HttpServletResponse response,
+            org.springframework.security.core.AuthenticationException failure) throws java.io.IOException {
+        response.sendRedirect(request.getContextPath() + "/borrower?loginError");
+    }
+
+    static org.springframework.security.web.authentication.logout.LogoutSuccessHandler oidcLogoutSuccessHandler(
+            ClientRegistrationRepository registrations) {
+        OidcClientInitiatedLogoutSuccessHandler oidcLogout =
+                new OidcClientInitiatedLogoutSuccessHandler(registrations);
+        oidcLogout.setPostLogoutRedirectUri("{baseUrl}/oauth2/authorization/finbridge");
+        return (request, response, authentication) -> {
+            if (authentication != null
+                    && authentication.getDetails() instanceof org.springframework.security.oauth2.client.authentication
+                            .OAuth2AuthenticationToken oidcAuthentication) {
+                oidcLogout.onLogoutSuccess(request, response, oidcAuthentication);
+            } else {
+                response.sendRedirect(request.getContextPath() + "/");
+            }
+        };
     }
 
     private static CsrfTokenRequestHandler csrfTokenRequestHandler() {
