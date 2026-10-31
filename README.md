@@ -4,7 +4,7 @@
 
 FinBridge is an educational, synthetic lending-platform demonstration built around an external-provider plugin framework. A stable lending core calls independently packaged risk and payment providers through a typed SPI. The runtime discovers provider JARs, isolates provider-private dependencies, routes capabilities by tenant, and manages activation, draining, upgrades, and rollback without linking concrete providers into the host.
 
-![FinBridge plugin framework: a stable lending core connects through typed gateways and SPI contracts to independently packaged, tenant-routed risk and payment providers.](docs/architecture/finbridge-plugin-framework.svg)
+![FinBridge plugin framework: a stable lending core connects through typed gateways to independent, tenant-routed risk and payment providers.](docs/architecture/diagram-plugin-framework.svg)
 
 The framework keeps business policy in the core while provider implementations evolve independently. Add or upgrade a compatible provider at the integration boundary rather than embedding provider-specific code in lending workflows. Persisted payment ownership keeps reconciliation tied to the provider version that began the operation, even when future tenant routing changes.
 
@@ -15,7 +15,7 @@ The framework keeps business policy in the core while provider implementations e
 - **Route by tenant and capability:** different tenants can bind risk or payment capabilities to different provider versions.
 - **Manage change safely:** lifecycle controls drain invocations and support upgrade/rollback; unresolved payment work retains its original provider owner.
 
-See [Create a Synthetic Provider](docs/guides/create-provider.md), [Plugin Lifecycle](docs/architecture/04-plugin-lifecycle.md), and [Tenant Routing](docs/architecture/10-multi-tenant-routing.md) for implementation details.
+See [Create a Synthetic Provider](docs/guides/create-provider.md), [Plugin Lifecycle](docs/architecture/06-plugin-lifecycle.md), and [Tenant Routing](docs/architecture/12-tenant-routing.md) for implementation details.
 
 This is not a production lending, underwriting, identity, or payment system. All applicants, tenants, decisions, transactions, and providers are synthetic. Plugin class-loader isolation is not a sandbox: plugins execute as trusted code in the host process. The runtime is designed for one host process. Do not use real customer data, credentials, or provider integrations.
 
@@ -91,20 +91,22 @@ See [Testing and Evidence](docs/guides/testing-and-evidence.md) for scope and ev
 
 ## Architecture and Guides
 
-- [FinBridge Through a Domain-Driven Design Lens](docs/architecture/domain-driven-design.md)
-- [System overview](docs/architecture/01-system-overview.md)
-- [Lending domain model](docs/architecture/02-lending-domain-model.md)
-- [SPI contract design](docs/architecture/02-spi-contract-design.md)
-- [Plugin class-loader isolation](docs/architecture/03-classloader-isolation.md)
-- [Origination workflow](docs/architecture/03-loan-origination-workflow.md)
-- [Risk gateway](docs/architecture/04-risk-decision-and-data-gateway.md)
-- [Plugin lifecycle](docs/architecture/04-plugin-lifecycle.md)
-- [Payment and disbursement](docs/architecture/05-payment-gateway-and-disbursement.md)
-- [Repayment plans](docs/architecture/06-repayment-plan-design.md)
-- [Tenant routing](docs/architecture/10-multi-tenant-routing.md)
-- [Transaction consistency](docs/architecture/11-transaction-consistency.md)
-- [Security, reliability, and observability](docs/architecture/12-security-reliability-observability.md)
-    - [Production evolution and limitations](docs/architecture/13-production-evolution.md)
+- [Architecture guide](docs/architecture/README.md)
+- [Full platform specification](docs/architecture/01-platform-spec.md)
+- [Domain-driven design](docs/architecture/02-domain-driven-design.md)
+- [System architecture](docs/architecture/03-system-architecture.md)
+- [Provider SPI contracts](docs/architecture/04-spi-contracts.md)
+- [Class-loader isolation](docs/architecture/05-classloader-isolation.md)
+- [Plugin lifecycle](docs/architecture/06-plugin-lifecycle.md)
+- [Lending domain](docs/architecture/07-lending-domain.md)
+- [Origination workflow](docs/architecture/08-origination-workflow.md)
+- [Risk assessment](docs/architecture/09-risk-assessment.md)
+- [Payment and disbursement](docs/architecture/10-payment-disbursement.md)
+- [Repayment schedule](docs/architecture/11-repayment-schedule.md)
+- [Tenant capability routing](docs/architecture/12-tenant-routing.md)
+- [Transaction consistency](docs/architecture/13-transaction-consistency.md)
+- [Security and reliability](docs/architecture/14-security-reliability.md)
+- [Production evolution and limits](docs/architecture/15-production-evolution.md)
 - [Getting started](docs/guides/getting-started.md)
 - [Create a provider](docs/guides/create-provider.md)
 - [Plugin lifecycle operations](docs/guides/plugin-lifecycle-operations.md)
@@ -113,11 +115,11 @@ See [Testing and Evidence](docs/guides/testing-and-evidence.md) for scope and ev
 - [Portfolio case study and demo screenshots](docs/portfolio/case-study.md)
 - [Architecture decision records](docs/adr/README.md)
 
-The active design baseline is [M0 proposal v2](docs/architecture/m0-proposal-v2.md), together with accepted ADRs. [M0 proposal v1](docs/architecture/m0-proposal.md) is superseded historical material. Experimental M0 spikes are isolated under `m0-spikes/` and are not product modules.
+The current platform specification describes the implemented system and its explicit limits. Individual accepted design decisions remain recorded in [ADRs](docs/adr/README.md); see the [architecture review checklist](docs/quality/architecture-review-checklist.md) for implementation-to-test traceability.
 
 ## Project Status and Limitations
 
-The repository includes implementation milestones M1-M6 and the approved M7 local authenticated demo layer. The demo and its identity configuration are for local evaluation only. It demonstrates selected hardened web controls but is not production-ready or a production security recommendation. Production identity selection, deployment hardening, secrets management, multi-host guarantees, real risk underwriting, and real payment settlement are out of scope. See the [security architecture](docs/architecture/12-security-reliability-observability.md), [local demo threat model](docs/security/threat-model.md), [production evolution notes](docs/architecture/13-production-evolution.md), and [portfolio case study](docs/portfolio/case-study.md) for limits and evidence.
+The repository is a local synthetic demonstration. It demonstrates selected web controls but is not production-ready or a production security recommendation. Production identity selection, deployment hardening, secrets management, multi-host guarantees, real risk underwriting, and real payment settlement are out of scope. See [Security and Reliability](docs/architecture/14-security-reliability.md), the [local demo threat model](docs/security/threat-model.md), [Production Evolution and Limits](docs/architecture/15-production-evolution.md), and the [portfolio case study](docs/portfolio/case-study.md) for limitations and evidence.
 
 ## License
 

@@ -9,7 +9,7 @@ Demonstrate risk providers are separate artifacts discovered at runtime rather t
 - Provider artifacts: `plugins/creditscorex`, `plugins/blacklisty`, `plugins/fraudsignalz`
 - Runtime: `PluginRuntime.installRiskProvider`, `PluginDiscovery.discoverRiskProvider`
 - Tests: `PluginRuntimeRiskIntegrationTest`, `RiskDataGatewayIntegrationTest.loadsAllRiskPluginsAsExternalJarsAndReturnsTypedSyntheticValues`, `HostPackagingTest`
-- Related design: `docs/architecture/03-classloader-isolation.md`, `docs/architecture/04-risk-decision-and-data-gateway.md`
+- Related design: `docs/architecture/05-classloader-isolation.md`, `docs/architecture/09-risk-assessment.md`
 
 ## Verification Command and Expected Result
 

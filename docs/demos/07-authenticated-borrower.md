@@ -21,7 +21,7 @@ The live E2E checks Keycloak Authorization Code + PKCE, secure session-cookie at
 - Executable: `scripts/demo-http-e2e.mjs`
 - HTTP security tests: `DemoSecurityHttpTest`
 - Mapping/role tests: `DemoOidcUserTest`
-- Related design: ADR-014 and `docs/architecture/12-security-reliability-observability.md`
+- Related design: ADR-014 and `docs/architecture/14-security-reliability.md`
 - Actual result: M7 Demo Review Record in `docs/quality/architecture-review-checklist.md`
 - Anonymous entry screenshot: `../portfolio/screenshots/borrower-demo.png`
 

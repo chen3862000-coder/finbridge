@@ -9,7 +9,7 @@ Show capability routing is selected by tenant, while core business logic remains
 - Runtime: `PluginRuntime.route`, `PluginBindingRegistry`
 - Durable control plane: `PluginControlPlaneRepository.bindingSwitch`
 - Tests: `PluginRuntimeIntegrationTest.bindingUpdatesAreOptimisticAndRoutingPinsSelectedHandle`, `PluginControlPlaneIntegrationTest`
-- Related design: ADR-005 and `docs/architecture/10-multi-tenant-routing.md`
+- Related design: ADR-005 and `docs/architecture/12-tenant-routing.md`
 
 ## Verification Command and Expected Result
 

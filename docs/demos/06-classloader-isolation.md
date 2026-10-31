@@ -10,7 +10,7 @@ Show two real provider JARs can load conflicting helper versions while sharing t
 - Artifacts: `plugins/alphapay-v1`, `plugins/alphapay-v2`, private helper modules v1/v2
 - Test: `PluginRuntimeIntegrationTest.loadsRealExternalPluginJarsWithSharedSpiAndPrivateDependencyIsolation`
 - Packaging boundary: `ArchitectureBoundaryTest`, `HostPackagingTest`
-- Related design: `docs/architecture/03-classloader-isolation.md`
+- Related design: `docs/architecture/05-classloader-isolation.md`
 
 ## Verification Command and Expected Result
 

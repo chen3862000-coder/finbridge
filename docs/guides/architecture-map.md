@@ -14,6 +14,10 @@ The root `pom.xml` aggregates Maven modules but does not make all modules runtim
 - Payment ownership is pinned to the original plugin/version. Unknown outcomes are reconciled, never blindly resubmitted.
 - Loan and repayment plan are activated only after confirmed successful disbursement is persisted.
 
+## Architecture Reading Path
+
+Start with the [platform specification](../architecture/01-platform-spec.md), then use the [architecture guide](../architecture/README.md) to navigate domain and runtime topics.
+
 ## Source References
 
 - `finbridge-spi/src/main/java/io/github/finbridge/spi/`
@@ -23,4 +27,4 @@ The root `pom.xml` aggregates Maven modules but does not make all modules runtim
 - `finbridge-payment-gateway/src/main/java/io/github/finbridge/payment/`
 - `finbridge-host/src/main/java/io/github/finbridge/host/`
 - `finbridge-demo-app/src/main/java/io/github/finbridge/demo/`
-- [Architecture documents](../architecture/m0-proposal-v2.md#16-documentation-and-evidence-plan)
+- [Architecture documents](../architecture/README.md)
